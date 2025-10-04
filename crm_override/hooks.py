@@ -26,7 +26,9 @@ app_license = "mit"
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/crm_override/css/crm_override.css"
-# app_include_js = "/assets/crm_override/js/crm_override.js"
+app_include_js = [
+    "/assets/crm_override/frontend/dist/crm_override.umd.js"
+]
 
 # include js, css files in header of web template
 # web_include_css = "/assets/crm_override/css/crm_override.css"

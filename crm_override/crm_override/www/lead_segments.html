@@ -1,0 +1,20 @@
+<h1>Lead Segments</h1>
+<p>Create and view your lead segments here.</p>
+
+<form method="POST">
+  <label for="segmentname">Segment Name:</label><br>
+  <input type="text" id="segmentname" name="segmentname" required><br>
+  <label for="description">Description:</label><br>
+  <textarea id="description" name="description"></textarea><br>
+  <label for="leads">Leads (comma separated):</label><br>
+  <input type="text" id="leads" name="leads" required><br>
+  <input type="submit" value="Create Segment">
+</form>
+
+{% if frappe.request.method == 'POST' %}
+  {% set segmentname = frappe.form_dict.segmentname %}
+  {% set description = frappe.form_dict.description %}
+  {% set leads = frappe.form_dict.leads.split(',') %}
+  {% set segment = frappe.get_attr('crm_override.crm_override.broadcast_utils.create_lead_segment')(segmentname, leads, description=description) %}
+  <p>Segment <b>{{ segment.segmentname }}</b> created with leads: {{ leads|join(', ') }}</p>
+{% endif %}
