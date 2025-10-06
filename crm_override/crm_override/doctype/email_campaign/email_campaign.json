@@ -13,8 +13,7 @@
   "column_break_4",
   "start_date",
   "end_date",
-  "status",
-  "segment"
+  "status"
  ],
  "fields": [
   {
@@ -31,7 +30,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Email Campaign For ",
-   "options": "\nCRM Lead\nLead Segment\nContact\nEmail Group",
+   "options": "CRM Lead\nLead Segment\nContact\nEmail Group",
    "reqd": 1
   },
   {
@@ -73,7 +72,7 @@
   }
  ],
  "links": [],
- "modified": "2025-10-03 12:14:34.332933",
+ "modified": "2025-10-06 17:02:33.145111",
  "modified_by": "Administrator",
  "module": "CRM Override",
  "name": "Email Campaign",

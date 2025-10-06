@@ -36,7 +36,7 @@ def list_lead_segments():
 
 
 @frappe.whitelist()
-def send_email_to_segment(segment_name, subject, message):
+def send_email_to_segment(segment_name, subject, message, sender_email):
     """
     Send an email to all leads in a segment using Frappe's sendmail (via SMTP)
     and log the communication in CRM.
