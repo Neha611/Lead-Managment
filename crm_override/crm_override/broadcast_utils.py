@@ -2,7 +2,7 @@ import frappe
 from frappe.utils import add_days, getdate, now_datetime, datetime
 from frappe.utils.background_jobs import enqueue
 from frappe.email.doctype.email_template.email_template import get_email_template
-
+from frappe.utils import cint
 def create_lead_segment(segmentname, lead_names, description=None):
     """
     Create a Lead Segment with selected leads.
@@ -36,7 +36,7 @@ def list_lead_segments():
 
 
 @frappe.whitelist()
-def send_email_to_segment(segment_name, subject, message, sender_email, send_now=False):
+def send_email_to_segment(segment_name, subject, message, sender_email, send_now=False, send_after_datetime=None):
     """
     Send an email to all leads in a segment using Frappe's email system.
     
@@ -116,6 +116,7 @@ def send_email_to_segment(segment_name, subject, message, sender_email, send_now
                     "reference_name": lead_doc.name,
                     "message": message,
                     "sender": sender_email,
+                    "send_after": send_after_datetime, 
                     "recipients": [{
                         "recipient": recipient_email
                     }],
@@ -173,24 +174,46 @@ def send_email_to_segment(segment_name, subject, message, sender_email, send_now
 def launch_campaign(campaign_name: str, segment_name: str, sender_email: str):
     """
     Public method to launch the campaign:
-    Reads Campaign's schedule table and enqueues jobs for future sending
+    Reads Campaign's schedule table and enqueues jobs for future sending,
+    using both send_after_days and send_after_minutes.
     """
     campaign = frappe.get_doc("Campaign", campaign_name)
+    
     if not campaign.campaign_schedules:
         frappe.throw("No schedules defined for this campaign.")
 
-    # You can add start_date to Campaign if you want
+    # Calculate the current date for the base schedule date
     start_date = getdate(now_datetime())
 
     for row in campaign.campaign_schedules:
-        send_on = add_days(start_date, row.send_after_days)
+        
+        # 💡 FIX 1: Convert string values from the DocType row to integers using cint()
+        minutes_delay = cint(row.get("send_after_minutes"))
+        days_delay = cint(row.get("send_after_days"))
+        
+        # Calculate the total delay combining days and minutes
+        total_delay = datetime.timedelta(
+            days=days_delay, 
+            minutes=minutes_delay
+        )
+        
+        # Calculate the exact time the job should run
+        job_start_time = now_datetime() + total_delay
+        
+        # Calculate the 'send_on' date for logging/job name
+        send_on = getdate(job_start_time)
 
         enqueue(
-            method=send_scheduled_email,
+            method="crm_override.crm_override.broadcast_utils.send_scheduled_email", # 💡 FIX 2: Use the full method path!
             queue='long',
-            job_name=f"{campaign_name}-{row.email_template}-{send_on}",
+            # Job name includes the precise execution time
+            job_name=f"{campaign_name}-{row.email_template}-{job_start_time.strftime('%Y-%m-%d-%H-%M')}", 
             timeout=600,
-            start_after=now_datetime() + datetime.timedelta(days=row.send_after_days),
+            
+            # Use the calculated time for the precise delay
+            start_after=job_start_time, 
+            
+            # Parameters passed to send_scheduled_email:
             campaign_name=campaign_name,
             segment_name=segment_name,
             email_template=row.email_template,
@@ -198,12 +221,39 @@ def launch_campaign(campaign_name: str, segment_name: str, sender_email: str):
         )
 
         frappe.logger().info(
-            f"[Campaign Scheduler] Email from template {row.email_template} scheduled for {send_on}"
+            f"[Campaign Scheduler] Email from template {row.email_template} scheduled for {job_start_time.strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
     segment = frappe.get_doc("Lead Segment", segment_name)
     return f"Campaign '{campaign_name}' scheduled for segment '{segment.segmentname}' (ID: {segment.name})"
 
+
+# 💡 NEW REQUIRED FUNCTION: This is the function the enqueued job calls
+def send_scheduled_email(campaign_name, segment_name, email_template, sender_email):
+    """
+    This function is executed by the background worker after the
+    scheduled delay has passed. It calls the existing send_email_to_segment function.
+    """
+    
+    try:
+        # 1. Fetch template content
+        template = get_email_template(email_template)
+        
+        # 2. Call the main sending logic immediately (send_now=True)
+        send_email_to_segment(
+            segment_name=segment_name, 
+            subject=template.subject, 
+            message=template.response, 
+            sender_email=sender_email, 
+            send_now=True 
+        )
+        
+    except Exception:
+        # Log the failure for debugging
+        frappe.log_error(
+            title=f"Campaign Send Failure: {campaign_name}", 
+            message=frappe.get_traceback()
+        )
 
 @frappe.whitelist()
 def get_scheduled_emails(lead_email=None):
