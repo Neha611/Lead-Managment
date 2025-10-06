@@ -247,67 +247,46 @@ def get_scheduled_emails(lead_email=None):
     
     return results
 
-def send_scheduled_email(campaign_name, segment_name, email_template, sender_email):
+@frappe.whitelist()
+def get_scheduled_emails(lead_email=None):
     """
-    Worker method — sends emails for the given schedule when the job runs.
-    Uses Email Queue to properly queue and send emails.
+    Get all scheduled emails for a lead or all leads
+    :param lead_email: Optional - specific lead's email to check
+    :return: List of scheduled emails with details
     """
-    segment = frappe.get_doc("Lead Segment", segment_name)
-    
-    for item in segment.leads:
-        lead = frappe.get_doc("CRM Lead", item.lead)
-        recipient_email = lead.email
-
-        if not recipient_email:
-            frappe.logger().warning(f"[Campaign] Lead {lead.name} has no email; skipped.")
-            continue
-
-        try:
-            # Get email template and render with lead data
-            email_content = get_email_template(email_template, lead.as_dict())
-            subject = email_content.get('subject', 'No Subject')
-            message = email_content.get('message', '')
-
-            # Create Email Queue entry with proper settings
-            email_queue = frappe.get_doc({
-                "doctype": "Email Queue",
-                "sender": sender_email,
-                "subject": subject,  # CRITICAL: Must include subject
-                "reference_doctype": "Campaign",
-                "reference_name": campaign_name,
-                "message": message,
-                "add_unsubscribe_link": 0,
-                "unsubscribe_method": "",  # Set empty string instead of None
-                "unsubscribe_params": "",  # Set empty string instead of None
-                "recipients": [{
-                    "recipient": recipient_email
-                }]
-            })
-            email_queue.insert(ignore_permissions=True)
-            
-            frappe.logger().info(
-                f"[Campaign] Email '{subject}' queued for {recipient_email} "
-                f"(campaign: {campaign_name}, segment: {segment.segmentname})"
-            )
-
-        except Exception as e:
-            frappe.log_error(
-                title=f"Campaign Email Error - {campaign_name}",
-                message=f"Failed to queue email for {recipient_email}: {str(e)}\n{frappe.get_traceback()}"
-            )
-            continue
-
-    # Commit all email queue entries
-    frappe.db.commit()
-    
-    # Trigger email sending
-    try:
-        from frappe.email.queue import flush
-        flush()
-        frappe.db.commit()
-        frappe.logger().info(f"[Campaign] Email queue flushed for campaign {campaign_name}")
-    except Exception as e:
-        frappe.log_error(
-            title=f"Campaign Email Flush Error - {campaign_name}",
-            message=f"Failed to flush email queue: {str(e)}\n{frappe.get_traceback()}"
+    filters = {"status": "Not Sent"}
+    if lead_email:
+        # Get queue entries for specific email
+        recipient_queues = frappe.get_all(
+            "Email Queue Recipient",
+            filters={"recipient": lead_email},
+            fields=["parent"]
         )
+        if recipient_queues:
+            filters["name"] = ["in", [q.parent for q in recipient_queues]]
+    
+    email_queue = frappe.get_all(
+        "Email Queue",
+        filters=filters,
+        # 💡 FIX: ADD 'subject' TO THE FIELDS LIST
+        fields=["name", "creation", "send_after", "message", "reference_doctype", "reference_name", "subject"]
+    )
+    
+    results = []
+    for email in email_queue:
+        recipients = frappe.get_all(
+            "Email Queue Recipient",
+            filters={"parent": email.name},
+            fields=["recipient"]
+        )
+        
+        results.append({
+            "queue_id": email.name,
+            "subject": email.subject, # This line now works!
+            "created_on": email.creation,
+            "scheduled_time": email.send_after,
+            "recipients": [r.recipient for r in recipients],
+            "preview": email.message[:200] + "..." if len(email.message) > 200 else email.message
+        })
+    
+    return results
