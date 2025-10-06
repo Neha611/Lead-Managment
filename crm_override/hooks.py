@@ -145,23 +145,11 @@ app_include_js = [
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"crm_override.tasks.all"
-# 	],
-# 	"daily": [
-# 		"crm_override.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"crm_override.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"crm_override.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"crm_override.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+    "all": [
+        "crm_override.crm_override.doctype.email_campaign.email_campaign.process_email_campaigns"
+    ],
+}
 
 # Testing
 # -------
