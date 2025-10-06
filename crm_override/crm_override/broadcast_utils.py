@@ -35,17 +35,27 @@ def list_lead_segments():
     )
 
 
-def send_email_to_segment(segment_name, subject, message, sender_email):
+@frappe.whitelist()
+def send_email_to_segment(segment_name, subject, message):
     """
     Send an email to all leads in a segment using Frappe's sendmail (via SMTP)
     and log the communication in CRM.
-    
+
     :param segment_name: Name of the Lead Segment
     :param subject: Email subject
     :param message: Email body (HTML/text)
-    :param sender_email: Email address of sender (must match a configured Email Account in Frappe)
     :return: List of responses
     """
+    # Get default outgoing email account
+    sender_email = frappe.db.get_value(
+        "Email Account",
+        {"default_outgoing": 1},
+        "email_id"
+    )
+
+    if not sender_email:
+        frappe.throw("No default outgoing email account configured")
+
     segment = frappe.get_doc("Lead Segment", segment_name)
     lead_items = segment.leads
     responses = []
@@ -81,9 +91,9 @@ def send_email_to_segment(segment_name, subject, message, sender_email):
                 "content": message,
                 "sender": sender_email,
                 "recipients": recipient_email,
-                "status": "Linked",               
-                "sent_or_received": "Sent",       
-                "reference_doctype": "CRM Lead",  
+                "status": "Linked",
+                "sent_or_received": "Sent",
+                "reference_doctype": "CRM Lead",
                 "reference_name": item.lead,
             })
             comm.insert(ignore_permissions=True)
