@@ -226,48 +226,6 @@ def get_scheduled_emails(lead_email=None):
     email_queue = frappe.get_all(
         "Email Queue",
         filters=filters,
-        fields=["name", "creation", "send_after", "message", "reference_doctype", "reference_name"]
-    )
-    
-    results = []
-    for email in email_queue:
-        recipients = frappe.get_all(
-            "Email Queue Recipient",
-            filters={"parent": email.name},
-            fields=["recipient"]
-        )
-        
-        results.append({
-            "queue_id": email.name,
-            "created_on": email.creation,
-            "scheduled_time": email.send_after,
-            "recipients": [r.recipient for r in recipients],
-            "preview": email.message[:200] + "..." if len(email.message) > 200 else email.message
-        })
-    
-    return results
-
-@frappe.whitelist()
-def get_scheduled_emails(lead_email=None):
-    """
-    Get all scheduled emails for a lead or all leads
-    :param lead_email: Optional - specific lead's email to check
-    :return: List of scheduled emails with details
-    """
-    filters = {"status": "Not Sent"}
-    if lead_email:
-        # Get queue entries for specific email
-        recipient_queues = frappe.get_all(
-            "Email Queue Recipient",
-            filters={"recipient": lead_email},
-            fields=["parent"]
-        )
-        if recipient_queues:
-            filters["name"] = ["in", [q.parent for q in recipient_queues]]
-    
-    email_queue = frappe.get_all(
-        "Email Queue",
-        filters=filters,
         # 💡 FIX: ADD 'subject' TO THE FIELDS LIST
         fields=["name", "creation", "send_after", "message", "reference_doctype", "reference_name", "subject"]
     )
