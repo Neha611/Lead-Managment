@@ -36,6 +36,88 @@ def list_lead_segments():
 
 
 @frappe.whitelist()
+def get_segment_leads(segment_name):
+    """
+    Get all leads in a segment with their details.
+    :param segment_name: Name (ID) of the Lead Segment
+    :return: List of lead details
+    """
+    segment = frappe.get_doc("Lead Segment", segment_name)
+    leads = []
+
+    for item in segment.leads:
+        try:
+            lead = frappe.get_doc("CRM Lead", item.lead)
+            leads.append({
+                "name": lead.name,
+                "lead_name": lead.lead_name or lead.name,
+                "email": lead.email,
+                "mobile_no": lead.mobile_no,
+                "status": lead.status,
+                "organization": lead.organization,
+                "image": lead.image,
+            })
+        except Exception as e:
+            frappe.log_error(
+                title=f"Error fetching lead {item.lead}",
+                message=frappe.get_traceback()
+            )
+            continue
+
+    return leads
+
+
+@frappe.whitelist()
+def add_lead_to_segment(segment_name, lead_name):
+    """
+    Add a lead to a segment.
+    :param segment_name: Name (ID) of the Lead Segment
+    :param lead_name: Name (ID) of the CRM Lead to add
+    :return: Success status
+    """
+    segment = frappe.get_doc("Lead Segment", segment_name)
+
+    # Check if lead already exists in segment
+    for item in segment.leads:
+        if item.lead == lead_name:
+            frappe.throw(f"Lead {lead_name} is already in this segment")
+
+    # Add the lead
+    segment.append("leads", {"lead": lead_name})
+    segment.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {"success": True, "message": "Lead added to segment"}
+
+
+@frappe.whitelist()
+def remove_lead_from_segment(segment_name, lead_name):
+    """
+    Remove a lead from a segment.
+    :param segment_name: Name (ID) of the Lead Segment
+    :param lead_name: Name (ID) of the CRM Lead to remove
+    :return: Success status
+    """
+    segment = frappe.get_doc("Lead Segment", segment_name)
+
+    # Find and remove the lead
+    lead_found = False
+    for item in segment.leads:
+        if item.lead == lead_name:
+            segment.remove(item)
+            lead_found = True
+            break
+
+    if not lead_found:
+        frappe.throw(f"Lead {lead_name} not found in this segment")
+
+    segment.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {"success": True, "message": "Lead removed from segment"}
+
+
+@frappe.whitelist()
 def send_email_to_segment(segment_name, subject, message):
     """
     Send an email to all leads in a segment using Frappe's sendmail (via SMTP)
