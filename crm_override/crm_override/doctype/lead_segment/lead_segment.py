@@ -11,6 +11,44 @@ import frappe
 from crm_override.crm_override.broadcast_utils import send_email_to_segment
 
 class LeadSegment(Document):
+	@staticmethod
+	def default_list_data():
+		columns = [
+			{
+				"label": "Segment Name",
+				"type": "Data",
+				"key": "segmentname",
+				"width": "16rem",
+			},
+			{
+				"label": "Owner",
+				"type": "Link",
+				"key": "owner",
+				"options": "User",
+				"width": "12rem",
+			},
+			{
+				"label": "Created On",
+				"type": "Datetime",
+				"key": "creation",
+				"width": "10rem",
+			},
+			{
+				"label": "Last Modified",
+				"type": "Datetime",
+				"key": "modified",
+				"width": "10rem",
+			},
+		]
+		rows = [
+			"name",
+			"segmentname",
+			"owner",
+			"creation",
+			"modified",
+		]
+		return {'columns': columns, 'rows': rows}
+
 	def create_segment(self, lead_names, description=None):
 		"""
 		Create a segment with selected leads.
