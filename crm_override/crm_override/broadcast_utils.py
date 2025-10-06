@@ -1,5 +1,5 @@
 import frappe
-from frappe.utils import add_days, getdate, now_datetime
+from frappe.utils import add_days, getdate, now_datetime, datetime
 from frappe.utils.background_jobs import enqueue
 from frappe.email.doctype.email_template.email_template import get_email_template
 
@@ -22,6 +22,17 @@ def create_lead_segment(segmentname, lead_names, description=None):
     segment.insert()
     frappe.db.commit()
     return segment
+
+@frappe.whitelist()
+def list_lead_segments():
+    """
+    Return all lead segments with both ID and human-readable name.
+    """
+    return frappe.get_all(
+        "Lead Segment",
+        fields=["name", "segmentname", "creation"],
+        order_by="creation desc"
+    )
 
 
 def send_email_to_segment(segment_name, subject, message, sender_email):
@@ -95,7 +106,11 @@ def send_email_to_segment(segment_name, subject, message, sender_email):
                 "message": str(e)
             })
 
-    return responses
+    return {
+        "segment_id": segment.name,
+        "segment_name": segment.segmentname,
+        "results": responses
+    }
 
 
 @frappe.whitelist()
@@ -119,6 +134,7 @@ def launch_campaign(campaign_name: str, segment_name: str, sender_email: str):
             queue='long',
             job_name=f"{campaign_name}-{row.email_template}-{send_on}",
             timeout=600,
+            start_after=now_datetime() + datetime.timedelta(days=row.send_after_days),
             campaign_name=campaign_name,
             segment_name=segment_name,
             email_template=row.email_template,
@@ -129,7 +145,8 @@ def launch_campaign(campaign_name: str, segment_name: str, sender_email: str):
             f"[Campaign Scheduler] Email from template {row.email_template} scheduled for {send_on}"
         )
 
-    return f"Campaign {campaign_name} scheduled successfully!"
+    segment = frappe.get_doc("Lead Segment", segment_name)
+    return f"Campaign '{campaign_name}' scheduled for segment '{segment.segmentname}' (ID: {segment.name})"
 
 
 def send_scheduled_email(campaign_name, segment_name, email_template, sender_email):
@@ -160,7 +177,7 @@ def send_scheduled_email(campaign_name, segment_name, email_template, sender_ema
                 "reference_doctype": "Campaign",
                 "reference_name": campaign_name,
                 "message": message,
-                "add_unsubscribe_link": 0,  # Disable unsubscribe to avoid errors
+                "add_unsubscribe_link": 0, 
                 "recipients": [{
                     "recipient": recipient_email
                 }]
@@ -168,7 +185,8 @@ def send_scheduled_email(campaign_name, segment_name, email_template, sender_ema
             email_queue.insert(ignore_permissions=True)
             
             frappe.logger().info(
-                f"[Campaign] Email '{subject}' queued for {recipient_email} (campaign: {campaign_name})"
+                f"[Campaign] Email '{subject}' queued for {recipient_email} "
+                f"(campaign: {campaign_name}, segment: {segment.segmentname})"
             )
 
         except Exception as e:
