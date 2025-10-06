@@ -1,6 +1,7 @@
 import frappe
-from crm_override.crm_override.email_utils import log_email_in_crm
-
+from frappe.utils import add_days, getdate, now_datetime
+from frappe.utils.background_jobs import enqueue
+from frappe.email.doctype.email_template.email_template import get_email_template
 
 def create_lead_segment(segmentname, lead_names, description=None):
     """
@@ -95,3 +96,99 @@ def send_email_to_segment(segment_name, subject, message, sender_email):
             })
 
     return responses
+
+
+@frappe.whitelist()
+def launch_campaign(campaign_name: str, segment_name: str, sender_email: str):
+    """
+    Public method to launch the campaign:
+    Reads Campaign's schedule table and enqueues jobs for future sending
+    """
+    campaign = frappe.get_doc("Campaign", campaign_name)
+    if not campaign.campaign_schedules:
+        frappe.throw("No schedules defined for this campaign.")
+
+    # You can add start_date to Campaign if you want
+    start_date = getdate(now_datetime())
+
+    for row in campaign.campaign_schedules:
+        send_on = add_days(start_date, row.send_after_days)
+
+        enqueue(
+            method=send_scheduled_email,
+            queue='long',
+            job_name=f"{campaign_name}-{row.email_template}-{send_on}",
+            timeout=600,
+            campaign_name=campaign_name,
+            segment_name=segment_name,
+            email_template=row.email_template,
+            sender_email=sender_email
+        )
+
+        frappe.logger().info(
+            f"[Campaign Scheduler] Email from template {row.email_template} scheduled for {send_on}"
+        )
+
+    return f"Campaign {campaign_name} scheduled successfully!"
+
+
+def send_scheduled_email(campaign_name, segment_name, email_template, sender_email):
+    """
+    Worker method — sends emails for the given schedule when the job runs.
+    Uses Email Queue to properly queue and send emails.
+    """
+    segment = frappe.get_doc("Lead Segment", segment_name)
+    
+    for item in segment.leads:
+        lead = frappe.get_doc("CRM Lead", item.lead)
+        recipient_email = lead.email
+
+        if not recipient_email:
+            frappe.logger().warning(f"[Campaign] Lead {lead.name} has no email; skipped.")
+            continue
+
+        try:
+            # Get email template and render with lead data
+            email_content = get_email_template(email_template, lead.as_dict())
+            subject = email_content.get('subject', 'No Subject')
+            message = email_content.get('message', '')
+
+            # Create Email Queue entry with proper settings
+            email_queue = frappe.get_doc({
+                "doctype": "Email Queue",
+                "sender": sender_email,
+                "reference_doctype": "Campaign",
+                "reference_name": campaign_name,
+                "message": message,
+                "add_unsubscribe_link": 0,  # Disable unsubscribe to avoid errors
+                "recipients": [{
+                    "recipient": recipient_email
+                }]
+            })
+            email_queue.insert(ignore_permissions=True)
+            
+            frappe.logger().info(
+                f"[Campaign] Email '{subject}' queued for {recipient_email} (campaign: {campaign_name})"
+            )
+
+        except Exception as e:
+            frappe.log_error(
+                title=f"Campaign Email Error - {campaign_name}",
+                message=f"Failed to queue email for {recipient_email}: {str(e)}\n{frappe.get_traceback()}"
+            )
+            continue
+
+    # Commit all email queue entries
+    frappe.db.commit()
+    
+    # Trigger email sending
+    try:
+        from frappe.email.queue import flush
+        flush()
+        frappe.db.commit()
+        frappe.logger().info(f"[Campaign] Email queue flushed for campaign {campaign_name}")
+    except Exception as e:
+        frappe.log_error(
+            title=f"Campaign Email Flush Error - {campaign_name}",
+            message=f"Failed to flush email queue: {str(e)}\n{frappe.get_traceback()}"
+        )
