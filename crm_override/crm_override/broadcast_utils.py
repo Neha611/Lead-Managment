@@ -119,6 +119,7 @@ def send_email_to_segment(segment_name, subject, message, sender_email, send_now
                 
             else:
                 # Create email queue entry with scheduled time
+                default_unsubscribe_method = "/api/method/frappe.email.queue.unsubscribe?email={{ recipient }}"
                 email_queue = frappe.get_doc({
                     "doctype": "Email Queue",
                     "priority": 1,
@@ -131,7 +132,8 @@ def send_email_to_segment(segment_name, subject, message, sender_email, send_now
                     "recipients": [{
                         "recipient": recipient_email
                     }],
-                    "subject": subject
+                    "subject": subject,
+                    "unsubscribe_method": default_unsubscribe_method
                 }).insert(ignore_permissions=True)
 
                 # Log email in CRM as Queued
