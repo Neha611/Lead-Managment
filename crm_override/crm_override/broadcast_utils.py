@@ -1,8 +1,9 @@
 import frappe
-from frappe.utils import add_days, getdate, now_datetime, datetime
+from frappe.utils import add_days, getdate, now_datetime, get_datetime, datetime
 from frappe.utils.background_jobs import enqueue
 from frappe.email.doctype.email_template.email_template import get_email_template
 from frappe.utils import cint
+
 def create_lead_segment(segmentname, lead_names, description=None):
     """
     Create a Lead Segment with selected leads.
@@ -22,6 +23,7 @@ def create_lead_segment(segmentname, lead_names, description=None):
     segment.insert()
     frappe.db.commit()
     return segment
+
 
 @frappe.whitelist()
 def list_lead_segments():
@@ -45,6 +47,7 @@ def send_email_to_segment(segment_name, subject, message, sender_email, send_now
     :param message: Email body (HTML/text)
     :param sender_email: Email address of sender
     :param send_now: If True, send immediately. If False, queue the email
+    :param send_after_datetime: DateTime to send the email (string or datetime object)
     :return: List of responses
     """
     # Get default outgoing email account if sender not specified
@@ -62,7 +65,15 @@ def send_email_to_segment(segment_name, subject, message, sender_email, send_now
     lead_items = segment.leads
     responses = []
 
+    # Convert send_after_datetime to datetime object if it's a string
+    if send_after_datetime and isinstance(send_after_datetime, str):
+        send_after_datetime = get_datetime(send_after_datetime)
+
     for item in lead_items:
+        recipient_email = None
+        comm = None
+        email_queue = None
+        
         try:
             lead_doc = frappe.get_doc("CRM Lead", item.lead)
             recipient_email = getattr(lead_doc, "email", None)
@@ -107,7 +118,7 @@ def send_email_to_segment(segment_name, subject, message, sender_email, send_now
                 msg = "Email sent immediately"
                 
             else:
-                # Create email queue entry
+                # Create email queue entry with scheduled time
                 email_queue = frappe.get_doc({
                     "doctype": "Email Queue",
                     "priority": 1,
@@ -116,14 +127,14 @@ def send_email_to_segment(segment_name, subject, message, sender_email, send_now
                     "reference_name": lead_doc.name,
                     "message": message,
                     "sender": sender_email,
-                    "send_after": send_after_datetime, 
+                    "send_after": send_after_datetime if send_after_datetime else now_datetime(),
                     "recipients": [{
                         "recipient": recipient_email
                     }],
                     "subject": subject
                 }).insert(ignore_permissions=True)
 
-                # Log email in CRM
+                # Log email in CRM as Queued
                 comm = frappe.get_doc({
                     "doctype": "Communication",
                     "communication_type": "Communication",
@@ -132,16 +143,16 @@ def send_email_to_segment(segment_name, subject, message, sender_email, send_now
                     "content": message,
                     "sender": sender_email,
                     "recipients": recipient_email,
-                    "status": "Queued",
+                    "status": "Linked",
                     "sent_or_received": "Sent",
                     "reference_doctype": "CRM Lead",
                     "reference_name": item.lead,
                     "email_queue": email_queue.name,
-                    "email_status": "Queued"
+                    "email_status": "Open"
                 }).insert(ignore_permissions=True)
                 
-                status = "queued"
-                msg = "Email added to queue"
+                status = "not sent"
+                msg = f"Email scheduled for {send_after_datetime}" if send_after_datetime else "Email added to queue"
                 
             frappe.db.commit()
 
@@ -151,14 +162,15 @@ def send_email_to_segment(segment_name, subject, message, sender_email, send_now
                 "status": status,
                 "message": msg,
                 "communication_id": comm.name if comm else None,
-                "email_queue_id": email_queue.name if not send_now else None
+                "email_queue_id": email_queue.name if email_queue else None,
+                "scheduled_time": str(send_after_datetime) if send_after_datetime else None
             })
 
         except Exception as e:
             frappe.log_error(title="Email Sending Error", message=frappe.get_traceback())
             responses.append({
                 "lead": item.lead,
-                "email": recipient_email if 'recipient_email' in locals() else None,
+                "email": recipient_email if recipient_email else None,
                 "status": "error",
                 "message": str(e)
             })
@@ -171,100 +183,122 @@ def send_email_to_segment(segment_name, subject, message, sender_email, send_now
 
 
 @frappe.whitelist()
-def launch_campaign(campaign_name: str, segment_name: str, sender_email: str):
+def launch_campaign(campaign_name: str, segment_name: str, sender_email: str, start_datetime=None):
     """
-    Public method to launch the campaign:
-    Reads Campaign's schedule table and enqueues jobs for future sending,
-    using both send_after_days and send_after_minutes.
+    Launch the campaign by reading Campaign's schedule table and scheduling emails.
+    Supports both send_after_days and send_after_minutes for flexible scheduling.
+    Uses Email Queue's send_after field directly.
+    
+    :param campaign_name: Name of the Campaign DocType
+    :param segment_name: Name of the Lead Segment
+    :param sender_email: Email address of the sender
+    :param start_datetime: Base datetime to calculate schedules from (defaults to now)
+    :return: Success message with campaign details
     """
     campaign = frappe.get_doc("Campaign", campaign_name)
     
     if not campaign.campaign_schedules:
         frappe.throw("No schedules defined for this campaign.")
 
-    # Calculate the current date for the base schedule date
-    start_date = getdate(now_datetime())
-
-    for row in campaign.campaign_schedules:
-        
-        # 💡 FIX 1: Convert string values from the DocType row to integers using cint()
-        minutes_delay = cint(row.get("send_after_minutes"))
-        days_delay = cint(row.get("send_after_days"))
-        
-        # Calculate the total delay combining days and minutes
-        total_delay = datetime.timedelta(
-            days=days_delay, 
-            minutes=minutes_delay
-        )
-        
-        # Calculate the exact time the job should run
-        job_start_time = now_datetime() + total_delay
-        
-        # Calculate the 'send_on' date for logging/job name
-        send_on = getdate(job_start_time)
-
-        enqueue(
-            method="crm_override.crm_override.broadcast_utils.send_scheduled_email", # 💡 FIX 2: Use the full method path!
-            queue='long',
-            # Job name includes the precise execution time
-            job_name=f"{campaign_name}-{row.email_template}-{job_start_time.strftime('%Y-%m-%d-%H-%M')}", 
-            timeout=600,
-            
-            # Use the calculated time for the precise delay
-            start_after=job_start_time, 
-            
-            # Parameters passed to send_scheduled_email:
-            campaign_name=campaign_name,
-            segment_name=segment_name,
-            email_template=row.email_template,
-            sender_email=sender_email
-        )
-
-        frappe.logger().info(
-            f"[Campaign Scheduler] Email from template {row.email_template} scheduled for {job_start_time.strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-
     segment = frappe.get_doc("Lead Segment", segment_name)
-    return f"Campaign '{campaign_name}' scheduled for segment '{segment.segmentname}' (ID: {segment.name})"
-
-
-# 💡 NEW REQUIRED FUNCTION: This is the function the enqueued job calls
-def send_scheduled_email(campaign_name, segment_name, email_template, sender_email):
-    """
-    This function is executed by the background worker after the
-    scheduled delay has passed. It calls the existing send_email_to_segment function.
-    """
+    scheduled_count = 0
+    total_emails = 0
     
-    try:
-        # 1. Fetch template content
-        template = get_email_template(email_template)
-        
-        # 2. Call the main sending logic immediately (send_now=True)
-        send_email_to_segment(
-            segment_name=segment_name, 
-            subject=template.subject, 
-            message=template.response, 
-            sender_email=sender_email, 
-            send_now=True 
-        )
-        
-    except Exception:
-        # Log the failure for debugging
-        frappe.log_error(
-            title=f"Campaign Send Failure: {campaign_name}", 
-            message=frappe.get_traceback()
-        )
+    # Use provided start_datetime or current time as base
+    if start_datetime:
+        if isinstance(start_datetime, str):
+            base_time = get_datetime(start_datetime)
+        else:
+            base_time = start_datetime
+    else:
+        base_time = now_datetime()
+    
+    schedule_details = []
+    
+    for row in campaign.campaign_schedules:
+        try:
+            # Convert string values to integers
+            minutes_delay = cint(row.get("send_after_minutes", 0))
+            days_delay = cint(row.get("send_after_days", 0))
+            
+            # Calculate the total delay combining days and minutes
+            total_delay = datetime.timedelta(
+                days=days_delay, 
+                minutes=minutes_delay
+            )
+            
+            # Calculate the exact time the emails should be sent
+            send_time = base_time + total_delay
+            
+            # Get template content
+            template_doc = frappe.get_doc("Email Template", row.email_template)
+            
+            # Use send_email_to_segment with send_after_datetime
+            result = send_email_to_segment(
+                segment_name=segment_name,
+                subject=template_doc.subject,
+                message=template_doc.response,
+                sender_email=sender_email,
+                send_now=False,  # Don't send immediately
+                send_after_datetime=send_time  # Schedule for calculated time
+            )
+            
+            # Count successful schedules
+            scheduled_in_batch = 0
+            for r in result.get('results', []):
+                total_emails += 1
+                if r['status'] in ['not sent', 'sent']:
+                    scheduled_count += 1
+                    scheduled_in_batch += 1
+            
+            schedule_details.append({
+                "template": row.email_template,
+                "send_time": send_time.strftime('%Y-%m-%d %H:%M:%S'),
+                "delay": f"{days_delay}d {minutes_delay}m",
+                "emails_scheduled": scheduled_in_batch
+            })
+            
+            frappe.logger().info(
+                f"[Campaign Scheduler] Email template '{row.email_template}' scheduled for "
+                f"{send_time.strftime('%Y-%m-%d %H:%M:%S')} "
+                f"(+{days_delay}d {minutes_delay}m from {base_time.strftime('%Y-%m-%d %H:%M:%S')})"
+            )
+            
+        except Exception as e:
+            frappe.log_error(
+                title=f"Campaign Schedule Error: {campaign_name}",
+                message=f"Failed to schedule email template '{row.email_template}': {str(e)}\n{frappe.get_traceback()}"
+            )
+            continue
+
+    if scheduled_count == 0:
+        frappe.throw("Failed to schedule any emails. Check error logs for details.")
+    
+    return {
+        "message": f"Campaign '{campaign_name}' scheduled successfully",
+        "segment_name": segment.segmentname,
+        "segment_id": segment.name,
+        "emails_scheduled": scheduled_count,
+        "total_emails": total_emails,
+        "total_schedules": len(campaign.campaign_schedules),
+        "base_time": base_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "schedule_details": schedule_details
+    }
+
 
 @frappe.whitelist()
-def get_scheduled_emails(lead_email=None):
+def get_scheduled_emails(lead_email=None, campaign_name=None):
     """
-    Get all scheduled emails for a lead or all leads
+    Get all scheduled emails for a lead or all leads.
+
     :param lead_email: Optional - specific lead's email to check
+    :param campaign_name: Optional - filter by campaign
     :return: List of scheduled emails with details
     """
     filters = {"status": "Not Sent"}
+
+    # If a specific lead email is provided, get queue entries linked to it
     if lead_email:
-        # Get queue entries for specific email
         recipient_queues = frappe.get_all(
             "Email Queue Recipient",
             filters={"recipient": lead_email},
@@ -272,14 +306,29 @@ def get_scheduled_emails(lead_email=None):
         )
         if recipient_queues:
             filters["name"] = ["in", [q.parent for q in recipient_queues]]
-    
+
+    # ✅ Always define email_queue — not just when lead_email is given
     email_queue = frappe.get_all(
         "Email Queue",
         filters=filters,
-        # 💡 FIX: ADD 'subject' TO THE FIELDS LIST
-        fields=["name", "creation", "send_after", "message", "reference_doctype", "reference_name", "subject"]
+        fields=[
+            "name",
+            "creation",
+            "send_after",
+            "sender",
+            "message",
+            "status",
+            "error",
+            "message_id",
+            "reference_doctype",
+            "reference_name",
+            "communication",
+            "priority",
+            "email_account"
+        ],
+        order_by="send_after asc"
     )
-    
+
     results = []
     for email in email_queue:
         recipients = frappe.get_all(
@@ -287,14 +336,79 @@ def get_scheduled_emails(lead_email=None):
             filters={"parent": email.name},
             fields=["recipient"]
         )
-        
+
         results.append({
             "queue_id": email.name,
-            "subject": email.subject, # This line now works!
+            "sender": email.sender,
+            "status": email.status,
+            "error": email.error,
+            "message_id": email.message_id,
             "created_on": email.creation,
             "scheduled_time": email.send_after,
+            "reference_doctype": email.reference_doctype,
+            "reference_name": email.reference_name,
+            "communication": email.communication,
+            "priority": email.priority,
+            "email_account": email.email_account,
             "recipients": [r.recipient for r in recipients],
-            "preview": email.message[:200] + "..." if len(email.message) > 200 else email.message
+            "preview": (email.message[:200] + "...") if email.message and len(email.message) > 200 else email.message
         })
-    
+
     return results
+
+
+@frappe.whitelist()
+def cancel_scheduled_emails(queue_ids=None, lead_email=None):
+    """
+    Cancel scheduled emails by queue IDs or for a specific lead.
+    
+    :param queue_ids: List of Email Queue IDs to cancel (JSON string or list)
+    :param lead_email: Email of lead whose scheduled emails should be cancelled
+    :return: Number of cancelled emails
+    """
+    import json
+    
+    # Handle JSON string input for queue_ids
+    if queue_ids and isinstance(queue_ids, str):
+        try:
+            queue_ids = json.loads(queue_ids)
+        except:
+            pass
+    
+    if not queue_ids and not lead_email:
+        frappe.throw("Please provide either queue_ids or lead_email")
+    
+    filters = {"status": "Not Sent"}
+    
+    if lead_email:
+        recipient_queues = frappe.get_all(
+            "Email Queue Recipient",
+            filters={"recipient": lead_email},
+            fields=["parent"]
+        )
+        if recipient_queues:
+            filters["name"] = ["in", [q.parent for q in recipient_queues]]
+    elif queue_ids:
+        filters["name"] = ["in", queue_ids]
+    
+    email_queues = frappe.get_all("Email Queue", filters=filters, pluck="name")
+    
+    cancelled_count = 0
+    for queue_id in email_queues:
+        try:
+            queue_doc = frappe.get_doc("Email Queue", queue_id)
+            queue_doc.status = "Cancelled"
+            queue_doc.save(ignore_permissions=True)
+            cancelled_count += 1
+        except Exception as e:
+            frappe.log_error(
+                title=f"Failed to cancel Email Queue: {queue_id}",
+                message=str(e)
+            )
+    
+    frappe.db.commit()
+    
+    return {
+        "message": f"Cancelled {cancelled_count} scheduled email(s)",
+        "cancelled_count": cancelled_count
+    }
