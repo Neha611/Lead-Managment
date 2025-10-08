@@ -197,6 +197,7 @@ def launch_campaign(campaign_name: str, segment_name: str, sender_email: str, st
     :param start_datetime: Base datetime to calculate schedules from (defaults to now)
     :return: Success message with campaign details
     """
+    print("launch campaign called")
     campaign = frappe.get_doc("Campaign", campaign_name)
     
     if not campaign.campaign_schedules:
