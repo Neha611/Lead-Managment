@@ -1,149 +1,162 @@
-# Copyright (c) 2025, Neha and contributors
-# For license information, please see license.txt
-
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import getdate, nowdate
-from crm_override.crm_override.broadcast_utils import send_email_to_segment
+from frappe.utils import getdate, nowdate, get_datetime, now_datetime
+from crm_override.crm_override.broadcast_utils import launch_campaign
 
 class EmailCampaign(Document):
     def validate(self):
         self.validate_campaign()
         
     def validate_campaign(self):
+        """Validate required fields for the campaign"""
         if not self.campaign_name:
             frappe.throw(_("Campaign is required"))
         if not self.sender:
             frappe.throw(_("Sender is required"))
-        if getdate(self.start_date) < getdate(nowdate()):
-            frappe.throw(_("Start Date cannot be before today"))
+        if not self.recipient:
+            frappe.throw(_("Recipient (Lead Segment) is required"))
+        
+        # Allow start_date to be today or in the future
+        # Don't validate against past if it's being submitted now
+        if self.start_date and getdate(self.start_date) < getdate(nowdate()):
+            # Only throw error if document is new or not being submitted
+            if self.is_new() or self.docstatus == 0:
+                frappe.msgprint(
+                    _("Start Date is in the past. Campaign will be scheduled immediately."),
+                    indicator="orange"
+                )
 
     def on_submit(self):
+        """
+        Automatically launches the campaign when the document is submitted.
+        Schedules emails based on the campaign schedule and start_date.
+        """
+        # Set status to Scheduled upon submission
         if not self.status:
             self.status = "Scheduled"
-
-    def send_campaign(self):
-        """Process the campaign and send emails"""
+            
         try:
             if self.email_campaign_for == "Lead Segment":
-                segment = frappe.get_doc("Lead Segment", self.recipient)
+                # Determine the base start time for scheduling
+                if self.start_date:
+                    # If start_date is provided, use it as the base time
+                    start_datetime = get_datetime(self.start_date)
+                    
+                    # If start_date is in the past, use current time instead
+                    if start_datetime < now_datetime():
+                        frappe.msgprint(
+                            _("Start date is in the past. Using current time instead."),
+                            indicator="orange"
+                        )
+                        start_datetime = now_datetime()
+                else:
+                    # If no start_date, schedule immediately
+                    start_datetime = now_datetime()
                 
-                # Get campaign details for email content
-                campaign = frappe.get_doc("Campaign", self.campaign_name)
-                
-                # Prepare email content
-                subject = f"Campaign: {campaign.campaign_name}"
-                message = campaign.description
-                if not message:
-                    message = """
-                    <div>
-                        <p>Thank you for your interest!</p>
-                        <p>This is an automated email from our campaign.</p>
-                        <br>
-                        <p>Best regards,<br>{sender}</p>
-                    </div>
-                    """.format(sender=self.sender)
-                
-                print(f"Processing campaign {self.name} for segment {segment.name}")
-                
-                # Send email using broadcast utility
-                response = send_email_to_segment(
-                    segment_name=segment.name,
-                    subject=subject,
-                    message=message,
-                    sender_email=self.sender
+                frappe.logger().info(
+                    f"[Email Campaign] Launching campaign '{self.name}' "
+                    f"for segment '{self.recipient}' starting at {start_datetime}"
                 )
                 
-                # Update campaign status based on response
-                if response:
-                    successful_sends = sum(1 for r in response if r.get('status') == 'success')
-                    print(f"Campaign {self.name} processed. Successful sends: {successful_sends}")
-                    
-                    self.db_set('status', 'Completed')
-                    self.db_set('end_date', nowdate())
-                    
-                    # Log the campaign completion
-                    frappe.log_error(
-                        message=f"Campaign {self.name} completed. Successfully sent to {successful_sends} out of {len(response)} recipients.",
-                        title="Campaign Complete"
+                # Launch the campaign with the calculated start time
+                result = launch_campaign(
+                    campaign_name=self.campaign_name,
+                    segment_name=self.recipient,
+                    sender_email=self.sender,
+                    start_datetime=start_datetime
+                )
+                
+                # Update the Email Campaign status to 'Launched'
+                self.db_set('status', 'Launched')
+                frappe.db.commit()
+
+                # Show success message with details
+                message = _(
+                    "Campaign {0} launched successfully. "
+                    "Scheduled {1} emails across {2} batches starting from {3}."
+                ).format(
+                    self.name,
+                    result.get('emails_scheduled', 0),
+                    result.get('total_schedules', 0),
+                    result.get('base_time', 'now')
+                )
+                
+                frappe.msgprint(message, indicator="green")
+                
+                # Log schedule details
+                if result.get('schedule_details'):
+                    schedule_info = "\n".join([
+                        f"- {d['template']}: {d['send_time']} ({d['delay']}) - {d['emails_scheduled']} emails"
+                        for d in result['schedule_details']
+                    ])
+                    frappe.logger().info(
+                        f"[Email Campaign] Schedule details for {self.name}:\n{schedule_info}"
                     )
                     
-                return response
-                
-        except Exception as e:
-            frappe.log_error(
-                message=f"Failed to process campaign {self.name}: {str(e)}",
-                title="Campaign Processing Error"
-            )
-            raise
+            else:
+                frappe.throw(
+                    _("Campaign type {0} not supported for automatic scheduling.").format(
+                        self.email_campaign_for
+                    )
+                )
 
-def process_email_campaigns():
-    """
-    Background job to process scheduled email campaigns
-    This will be called by a scheduler
-    """
-    print("Starting email campaign processing...")
-    
-    campaigns = frappe.get_all(
-        "Email Campaign",
-        filters={
-            "status": "Scheduled",
-            "start_date": ["<=", nowdate()]
-        }
-    )
-    
-    print(f"Found {len(campaigns)} campaigns to process")
-    
-    for campaign in campaigns:
-        try:
-            print(f"\nProcessing campaign: {campaign.name}")
+        except Exception as e:
+            error_message = f"Failed to launch and schedule campaign {self.name}: {str(e)}"
+            frappe.log_error(
+                message=f"{error_message}\n\n{frappe.get_traceback()}",
+                title="Automatic Campaign Scheduling Error"
+            )
             
-            email_campaign = frappe.get_doc("Email Campaign", campaign.name)
-            email_campaign.db_set('status', 'In Progress')
+            # Set status to Error if scheduling fails
+            self.db_set('status', 'Error')
             frappe.db.commit()
             
-            print(f"Campaign {campaign.name} status set to In Progress")
-            
-            response = email_campaign.send_campaign()
-            
-            # Log success
-            if response:
-                successful = sum(1 for r in response if r.get('status') == 'success')
-                print(f"Campaign {campaign.name} completed. Sent {successful} of {len(response)} emails")
-            
-        except Exception as e:
-            error_msg = f"Failed to process campaign {campaign.name}: {str(e)}"
-            print(f"Error: {error_msg}")
-            
-            # Log error and update campaign status
-            frappe.log_error(
-                message=error_msg,
-                title="Campaign Processing Error"
+            # Show error to user
+            frappe.throw(
+                _("Failed to launch campaign. Error: {0}").format(str(e))
             )
-            
-            try:
-                email_campaign = frappe.get_doc("Email Campaign", campaign.name)
-                email_campaign.db_set('status', 'Error')
-                frappe.db.commit()
-            except:
-                print(f"Could not update status for campaign {campaign.name}")
-                
-    print("\nEmail campaign processing complete")
 
-def setup_scheduler():
-    """Setup scheduler events for email campaigns"""
-    try:
-        # Add a scheduled job for email campaign processing
-        if not frappe.db.exists("Scheduled Job Type", "process_email_campaigns"):
-            frappe.get_doc({
-                "doctype": "Scheduled Job Type",
-                "method": "crm_override.crm_override.doctype.email_campaign.email_campaign.process_email_campaigns",
-                "frequency": "All",
-                "name": "process_email_campaigns",
-                "documentation": "Process scheduled email campaigns"
-            }).insert()
+    def on_cancel(self):
+        """
+        When campaign is cancelled, cancel all scheduled emails.
+        """
+        try:
+            # Import here to avoid circular dependency
+            from crm_override.crm_override.broadcast_utils import cancel_scheduled_emails, get_scheduled_emails
             
-        print("Email campaign scheduler setup complete")
-    except Exception as e:
-        print(f"Failed to setup scheduler: {str(e)}")
+            # Get all scheduled emails for this campaign's segment
+            segment = frappe.get_doc("Lead Segment", self.recipient)
+            
+            # Get emails from all leads in segment
+            lead_emails = []
+            for lead_item in segment.leads:
+                lead_doc = frappe.get_doc("CRM Lead", lead_item.lead)
+                if hasattr(lead_doc, 'email') and lead_doc.email:
+                    lead_emails.append(lead_doc.email)
+            
+            # Cancel scheduled emails for each lead
+            total_cancelled = 0
+            for email in lead_emails:
+                result = cancel_scheduled_emails(lead_email=email)
+                total_cancelled += result.get('cancelled_count', 0)
+            
+            self.db_set('status', 'Cancelled')
+            frappe.db.commit()
+            
+            if total_cancelled > 0:
+                frappe.msgprint(
+                    _("Campaign cancelled. {0} scheduled emails were cancelled.").format(total_cancelled),
+                    indicator="orange"
+                )
+            else:
+                frappe.msgprint(_("Campaign cancelled."), indicator="orange")
+                
+        except Exception as e:
+            frappe.log_error(
+                message=f"Error cancelling scheduled emails for campaign {self.name}: {str(e)}",
+                title="Campaign Cancellation Error"
+            )
+            # Still set status to cancelled even if email cancellation fails
+            self.db_set('status', 'Cancelled')
+            frappe.db.commit()
