@@ -49,10 +49,41 @@ class Campaign(Document):
 	def autoname(self):
 		if not self.campaign_name:
 			frappe.throw(_("Campaign Name is required"))
-			
+
 		if frappe.defaults.get_global_default("campaign_naming_by") == "Naming Series":
 			if not self.naming_series:
 				self.naming_series = "SAL-CAM-.YYYY.-"
 			set_name_by_naming_series(self)
 		else:
 			self.name = self.campaign_name
+
+	@staticmethod
+	def default_list_data():
+		columns = [
+			{
+				"label": "Campaign Name",
+				"type": "Data",
+				"key": "campaign_name",
+				"width": "16rem",
+			},
+			{
+				"label": "Description",
+				"type": "Text",
+				"key": "description",
+				"width": "20rem",
+			},
+			{
+				"label": "Last Modified",
+				"type": "Datetime",
+				"key": "modified",
+				"width": "8rem",
+			},
+		]
+		rows = [
+			"name",
+			"campaign_name",
+			"description",
+			"modified",
+			"creation",
+		]
+		return {"columns": columns, "rows": rows}

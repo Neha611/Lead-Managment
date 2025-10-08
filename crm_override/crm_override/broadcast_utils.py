@@ -38,7 +38,7 @@ def list_lead_segments():
 
 
 @frappe.whitelist()
-def send_email_to_segment(segment_name, subject, message, sender_email, send_now=False, send_after_datetime=None):
+def send_email_to_segment(segment_name, subject, message, sender_email=None, send_now=False, send_after_datetime=None):
     """
     Send an email to all leads in a segment using Frappe's email system.
     
@@ -364,25 +364,25 @@ def get_scheduled_emails(lead_email=None, campaign_name=None):
 def cancel_scheduled_emails(queue_ids=None, lead_email=None):
     """
     Cancel scheduled emails by queue IDs or for a specific lead.
-    
+
     :param queue_ids: List of Email Queue IDs to cancel (JSON string or list)
     :param lead_email: Email of lead whose scheduled emails should be cancelled
     :return: Number of cancelled emails
     """
     import json
-    
+
     # Handle JSON string input for queue_ids
     if queue_ids and isinstance(queue_ids, str):
         try:
             queue_ids = json.loads(queue_ids)
         except:
             pass
-    
+
     if not queue_ids and not lead_email:
         frappe.throw("Please provide either queue_ids or lead_email")
-    
+
     filters = {"status": "Not Sent"}
-    
+
     if lead_email:
         recipient_queues = frappe.get_all(
             "Email Queue Recipient",
@@ -393,9 +393,9 @@ def cancel_scheduled_emails(queue_ids=None, lead_email=None):
             filters["name"] = ["in", [q.parent for q in recipient_queues]]
     elif queue_ids:
         filters["name"] = ["in", queue_ids]
-    
+
     email_queues = frappe.get_all("Email Queue", filters=filters, pluck="name")
-    
+
     cancelled_count = 0
     for queue_id in email_queues:
         try:
@@ -408,10 +408,408 @@ def cancel_scheduled_emails(queue_ids=None, lead_email=None):
                 title=f"Failed to cancel Email Queue: {queue_id}",
                 message=str(e)
             )
-    
+
     frappe.db.commit()
-    
+
     return {
         "message": f"Cancelled {cancelled_count} scheduled email(s)",
         "cancelled_count": cancelled_count
+    }
+
+
+# ============================================================
+# CRUD Operations for Lead Segments
+# ============================================================
+
+@frappe.whitelist()
+def get_segment_leads(segment_name):
+    """
+    Get all leads in a segment with their details.
+
+    :param segment_name: Name of the Lead Segment
+    :return: List of leads with details
+    """
+    segment = frappe.get_doc("Lead Segment", segment_name)
+    leads_data = []
+
+    for item in segment.leads:
+        try:
+            lead = frappe.get_doc("CRM Lead", item.lead)
+            leads_data.append({
+                "name": lead.name,
+                "lead_name": lead.lead_name,
+                "email": lead.email,
+                "mobile_no": lead.mobile_no,
+                "status": lead.status,
+                "image": lead.image if hasattr(lead, 'image') else None
+            })
+        except Exception as e:
+            frappe.log_error(
+                title=f"Failed to fetch lead {item.lead}",
+                message=str(e)
+            )
+            continue
+
+    return leads_data
+
+
+@frappe.whitelist()
+def add_lead_to_segment(segment_name, lead_name):
+    """
+    Add a lead to a segment.
+
+    :param segment_name: Name of the Lead Segment
+    :param lead_name: Name of the Lead to add
+    :return: Success message
+    """
+    segment = frappe.get_doc("Lead Segment", segment_name)
+
+    # Check if lead already exists in segment
+    for item in segment.leads:
+        if item.lead == lead_name:
+            frappe.throw(f"Lead {lead_name} is already in this segment")
+
+    # Add the lead
+    segment.append("leads", {"lead": lead_name})
+    segment.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "message": f"Lead {lead_name} added to segment successfully"
+    }
+
+
+@frappe.whitelist()
+def remove_lead_from_segment(segment_name, lead_name):
+    """
+    Remove a lead from a segment.
+
+    :param segment_name: Name of the Lead Segment
+    :param lead_name: Name of the Lead to remove
+    :return: Success message
+    """
+    segment = frappe.get_doc("Lead Segment", segment_name)
+
+    # Find and remove the lead
+    for item in segment.leads:
+        if item.lead == lead_name:
+            segment.remove(item)
+            break
+
+    segment.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "message": f"Lead {lead_name} removed from segment successfully"
+    }
+
+
+@frappe.whitelist()
+def get_lead_segment(name):
+    """
+    Get a specific Lead Segment with all details.
+
+    :param name: Name of the Lead Segment
+    :return: Lead Segment document
+    """
+    segment = frappe.get_doc("Lead Segment", name)
+    return {
+        "name": segment.name,
+        "segmentname": segment.segmentname,
+        "description": segment.description,
+        "creation": segment.creation,
+        "modified": segment.modified,
+        "leads": [{"lead": item.lead} for item in segment.leads]
+    }
+
+
+@frappe.whitelist()
+def update_lead_segment(name, segmentname=None, description=None, leads=None):
+    """
+    Update a Lead Segment.
+
+    :param name: Name of the Lead Segment to update
+    :param segmentname: New segment name (optional)
+    :param description: New description (optional)
+    :param leads: New list of lead names (optional)
+    :return: Updated Lead Segment
+    """
+    import json
+
+    segment = frappe.get_doc("Lead Segment", name)
+
+    if segmentname:
+        segment.segmentname = segmentname
+
+    if description is not None:
+        segment.description = description
+
+    if leads is not None:
+        # Handle JSON string input
+        if isinstance(leads, str):
+            leads = json.loads(leads)
+
+        # Clear existing leads and add new ones
+        segment.leads = []
+        for lead in leads:
+            segment.append("leads", {"lead": lead})
+
+    segment.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "name": segment.name,
+        "segmentname": segment.segmentname,
+        "description": segment.description,
+        "leads": [{"lead": item.lead} for item in segment.leads]
+    }
+
+
+@frappe.whitelist()
+def delete_lead_segment(name):
+    """
+    Delete a Lead Segment.
+
+    :param name: Name of the Lead Segment to delete
+    :return: Success message
+    """
+    frappe.delete_doc("Lead Segment", name, ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "message": f"Lead Segment '{name}' deleted successfully"
+    }
+
+
+# ============================================================
+# CRUD Operations for Campaigns
+# ============================================================
+
+@frappe.whitelist()
+def create_campaign(campaign_name, description=None):
+    """
+    Create a new Campaign.
+
+    :param campaign_name: Name of the Campaign
+    :param description: Optional description
+    :return: Campaign document
+    """
+    campaign = frappe.get_doc({
+        "doctype": "Campaign",
+        "campaign_name": campaign_name,
+        "description": description or ""
+    })
+    campaign.insert(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "name": campaign.name,
+        "campaign_name": campaign.campaign_name,
+        "description": campaign.description
+    }
+
+
+@frappe.whitelist()
+def list_campaigns():
+    """
+    Return all campaigns with details.
+    """
+    return frappe.get_all(
+        "Campaign",
+        fields=["name", "campaign_name", "description", "creation", "modified"],
+        order_by="creation desc"
+    )
+
+
+@frappe.whitelist()
+def get_campaign(name):
+    """
+    Get a specific Campaign with all details including schedules.
+
+    :param name: Name of the Campaign
+    :return: Campaign document
+    """
+    campaign = frappe.get_doc("Campaign", name)
+
+    schedules = []
+    for schedule in campaign.campaign_schedules:
+        schedules.append({
+            "email_template": schedule.email_template,
+            "send_after_days": schedule.send_after_days,
+            "send_after_minutes": schedule.send_after_minutes,
+            "idx": schedule.idx
+        })
+
+    return {
+        "name": campaign.name,
+        "campaign_name": campaign.campaign_name,
+        "description": campaign.description,
+        "creation": campaign.creation,
+        "modified": campaign.modified,
+        "campaign_schedules": schedules
+    }
+
+
+@frappe.whitelist()
+def update_campaign(name, campaign_name=None, description=None):
+    """
+    Update a Campaign.
+
+    :param name: Name of the Campaign to update
+    :param campaign_name: New campaign name (optional)
+    :param description: New description (optional)
+    :return: Updated Campaign
+    """
+    campaign = frappe.get_doc("Campaign", name)
+
+    if campaign_name:
+        campaign.campaign_name = campaign_name
+
+    if description is not None:
+        campaign.description = description
+
+    campaign.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "name": campaign.name,
+        "campaign_name": campaign.campaign_name,
+        "description": campaign.description
+    }
+
+
+@frappe.whitelist()
+def delete_campaign(name):
+    """
+    Delete a Campaign.
+
+    :param name: Name of the Campaign to delete
+    :return: Success message
+    """
+    frappe.delete_doc("Campaign", name, ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "message": f"Campaign '{name}' deleted successfully"
+    }
+
+
+# ============================================================
+# CRUD Operations for Email Campaigns
+# ============================================================
+
+@frappe.whitelist()
+def create_email_campaign(campaign_name, subject, message, sender_email=None):
+    """
+    Create a new Email Campaign.
+
+    :param campaign_name: Name of the Email Campaign
+    :param subject: Email subject
+    :param message: Email body
+    :param sender_email: Sender email (optional)
+    :return: Email Campaign document
+    """
+    email_campaign = frappe.get_doc({
+        "doctype": "Email Campaign",
+        "campaign_name": campaign_name,
+        "subject": subject,
+        "message": message,
+        "sender_email": sender_email or ""
+    })
+    email_campaign.insert(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "name": email_campaign.name,
+        "campaign_name": email_campaign.campaign_name,
+        "subject": email_campaign.subject,
+        "message": email_campaign.message,
+        "sender_email": email_campaign.sender_email
+    }
+
+
+@frappe.whitelist()
+def list_email_campaigns():
+    """
+    Return all email campaigns with details.
+    """
+    return frappe.get_all(
+        "Email Campaign",
+        fields=["name", "campaign_name", "subject", "sender_email", "creation", "modified"],
+        order_by="creation desc"
+    )
+
+
+@frappe.whitelist()
+def get_email_campaign(name):
+    """
+    Get a specific Email Campaign with all details.
+
+    :param name: Name of the Email Campaign
+    :return: Email Campaign document
+    """
+    email_campaign = frappe.get_doc("Email Campaign", name)
+
+    return {
+        "name": email_campaign.name,
+        "campaign_name": email_campaign.campaign_name,
+        "subject": email_campaign.subject,
+        "message": email_campaign.message,
+        "sender_email": email_campaign.sender_email,
+        "creation": email_campaign.creation,
+        "modified": email_campaign.modified
+    }
+
+
+@frappe.whitelist()
+def update_email_campaign(name, campaign_name=None, subject=None, message=None, sender_email=None):
+    """
+    Update an Email Campaign.
+
+    :param name: Name of the Email Campaign to update
+    :param campaign_name: New campaign name (optional)
+    :param subject: New subject (optional)
+    :param message: New message (optional)
+    :param sender_email: New sender email (optional)
+    :return: Updated Email Campaign
+    """
+    email_campaign = frappe.get_doc("Email Campaign", name)
+
+    if campaign_name:
+        email_campaign.campaign_name = campaign_name
+
+    if subject:
+        email_campaign.subject = subject
+
+    if message:
+        email_campaign.message = message
+
+    if sender_email is not None:
+        email_campaign.sender_email = sender_email
+
+    email_campaign.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "name": email_campaign.name,
+        "campaign_name": email_campaign.campaign_name,
+        "subject": email_campaign.subject,
+        "message": email_campaign.message,
+        "sender_email": email_campaign.sender_email
+    }
+
+
+@frappe.whitelist()
+def delete_email_campaign(name):
+    """
+    Delete an Email Campaign.
+
+    :param name: Name of the Email Campaign to delete
+    :return: Success message
+    """
+    frappe.delete_doc("Email Campaign", name, ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "message": f"Email Campaign '{name}' deleted successfully"
     }

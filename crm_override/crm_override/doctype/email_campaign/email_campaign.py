@@ -5,9 +5,58 @@ from frappe.utils import getdate, nowdate, get_datetime, now_datetime
 from crm_override.crm_override.broadcast_utils import launch_campaign
 
 class EmailCampaign(Document):
+    @staticmethod
+    def default_list_data():
+        columns = [
+            {
+                "label": "Campaign Name",
+                "type": "Link",
+                "key": "campaign_name",
+                "options": "Campaign",
+                "width": "14rem",
+            },
+            {
+                "label": "Recipient",
+                "type": "Data",
+                "key": "recipient",
+                "width": "14rem",
+            },
+            {
+                "label": "Status",
+                "type": "Select",
+                "key": "status",
+                "width": "10rem",
+            },
+            {
+                "label": "Start Date",
+                "type": "Date",
+                "key": "start_date",
+                "width": "10rem",
+            },
+            {
+                "label": "Last Modified",
+                "type": "Datetime",
+                "key": "modified",
+                "width": "8rem",
+            },
+        ]
+        rows = [
+            "name",
+            "campaign_name",
+            "email_campaign_for",
+            "recipient",
+            "sender",
+            "status",
+            "start_date",
+            "end_date",
+            "modified",
+            "creation",
+        ]
+        return {"columns": columns, "rows": rows}
+
     def validate(self):
         self.validate_campaign()
-        
+
     def validate_campaign(self):
         """Validate required fields for the campaign"""
         if not self.campaign_name:
