@@ -151,6 +151,12 @@ scheduler_events = {
     ],
 }
 
+# tracker
+override_whitelisted_methods = {
+    "frappe.email.queue.email_tracker": "crm_override.crm_override.email_tracker"
+}
+
+
 # Testing
 # -------
 
