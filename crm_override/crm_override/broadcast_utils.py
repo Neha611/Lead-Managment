@@ -3,8 +3,7 @@ from frappe.utils import add_days, getdate, now_datetime, get_datetime, datetime
 from frappe.utils.background_jobs import enqueue
 from frappe.email.doctype.email_template.email_template import get_email_template
 from frappe.utils import cint
-import html
-from bs4 import BeautifulSoup
+from .email_tracker import update_tracker_on_email_send, update_tracker_on_email_error
 
 def create_lead_segment(segmentname, lead_names, description=None):
     """
@@ -35,6 +34,8 @@ def list_lead_segments():
     )
 
 
+# In broadcast_utils.py, update inject_tracking_pixel:
+
 def inject_tracking_pixel(message, email_queue_name):
     """Inject tracking pixel safely at the end of body tag."""
     if not message:
@@ -57,9 +58,10 @@ def inject_tracking_pixel(message, email_queue_name):
     elif "</html>" in lower:
         idx = lower.rfind("</html>")
         return message[:idx] + pixel + message[idx:]
-    # If no html structure, append at the end
+    # If no html structure, wrap it in minimal HTML
     else:
-        return message + pixel
+        wrapped_message = f"<html><body>{message}{pixel}</body></html>"
+        return wrapped_message
 
 
 def create_lead_email_tracker(lead_name, email_queue_name, initial_status="Queued"):
@@ -136,115 +138,6 @@ def update_tracker_status(email_queue_name, status, error_message=None):
             message=f"Email Queue: {email_queue_name}\nStatus: {status}\nError: {str(e)}\n{frappe.get_traceback()}"
         )
 
-
-def clean_quill_message(message):
-    """
-    Clean deeply escaped Quill HTML safely.
-    Removes nested wrappers, reconstructs real HTML structure,
-    and preserves message formatting.
-    """
-    if not message:
-        frappe.logger().warning("clean_quill_message: Empty message received")
-        return ""
-
-    original_message = message
-    
-    # Log original message for debugging
-    frappe.logger().info(f"clean_quill_message: Original length={len(message)}")
-
-    # Step 1: Handle Quill editor wrapper with escaped HTML
-    soup = BeautifulSoup(message, "html.parser")
-    div = soup.find("div", class_="ql-editor")
-    
-    if div:
-        frappe.logger().info("Found Quill editor div, extracting and unescaping content")
-        # Extract text from all <p> tags and unescape
-        paragraphs = div.find_all("p", recursive=False)
-        if paragraphs:
-            # Combine all paragraph text and unescape
-            combined_text = "".join(p.get_text() for p in paragraphs)
-            # Replace &nbsp; with space
-            combined_text = combined_text.replace("\xa0", " ").replace("&nbsp;", " ")
-            # Unescape HTML entities
-            combined_text = html.unescape(combined_text)
-            
-            frappe.logger().info(f"Extracted and unescaped length: {len(combined_text)}")
-            
-            # Now parse the unescaped HTML
-            message = combined_text
-    
-    # Step 2: Additional unescaping if needed
-    for i in range(2):
-        new = html.unescape(message)
-        if new == message:
-            break
-        message = new
-
-    # Step 3: Check if message is already valid HTML - if so, return as-is with tracking support
-    if message.strip().startswith("<!DOCTYPE html>") or message.strip().startswith("<html"):
-        frappe.logger().info("Message is already valid HTML document, returning as-is")
-        # Just ensure it has proper structure
-        if "</body>" in message.lower() and "</html>" in message.lower():
-            return message.strip()
-
-    try:
-        soup = BeautifulSoup(message, "html.parser")
-
-        # Step 4: Remove only wrapper tags, preserve content structure
-        for tag in soup.find_all(["html", "head", "meta"]):
-            tag.unwrap()
-        
-        # Remove [document] tag if present
-        for tag in soup.find_all(string=lambda text: isinstance(text, str) and '[document]' in text):
-            tag.extract()
-        
-        # Step 5: Handle body tags - keep content, remove wrapper
-        body_tags = soup.find_all("body")
-        
-        if len(body_tags) > 0:
-            frappe.logger().info(f"Found {len(body_tags)} body tags, extracting content")
-            # Get the innerHTML of the first body tag
-            body_content = "".join(str(tag) for tag in body_tags[0].children)
-            clean_html = body_content
-        else:
-            # No body tags, use all content
-            clean_html = str(soup).strip()
-        
-        frappe.logger().info(f"Cleaned HTML length: {len(clean_html)}")
-        
-        # Step 6: Validate we have actual content
-        text_content = BeautifulSoup(clean_html, "html.parser").get_text(strip=True)
-        if not text_content or len(text_content) < 10:
-            frappe.logger().warning(f"No meaningful text content found ({len(text_content)} chars), using original")
-            return original_message
-
-        # Step 7: Build final valid HTML structure
-        final_html = f"""<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-{clean_html}
-</body>
-</html>"""
-
-        frappe.logger().info(f"Final HTML length: {len(final_html)}")
-        return final_html.strip()
-        
-    except Exception as e:
-        frappe.log_error(
-            title="Error cleaning Quill message",
-            message=f"Error: {str(e)}\nOriginal message length: {len(original_message)}\nFirst 500 chars: {original_message[:500]}\n{frappe.get_traceback()}"
-        )
-        # Return original message with basic HTML wrapper if cleaning fails
-        return f"""<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-{original_message}
-</body>
-</html>"""
-
-
 @frappe.whitelist()
 def send_email_to_segment(segment_name, subject, message, sender_email=None, send_now=False, send_after_datetime=None):
     """
@@ -266,18 +159,6 @@ def send_email_to_segment(segment_name, subject, message, sender_email=None, sen
     if send_after_datetime and isinstance(send_after_datetime, str):
         send_after_datetime = get_datetime(send_after_datetime)
 
-    # Clean message from Quill editor and unescape HTML
-    # BUT: If message is already valid HTML, don't clean it
-    if message and ("<!DOCTYPE" in message or "<html>" in message.lower()):
-        frappe.logger().info("Message appears to be valid HTML already, skipping cleaning")
-        cleaned_message = message
-    else:
-        cleaned_message = clean_quill_message(message)
-    
-    # Log for debugging
-    frappe.logger().info(f"Original message length: {len(message)}")
-    frappe.logger().info(f"Cleaned message length: {len(cleaned_message)}")
-
     for item in lead_items:
         recipient_email = None
         comm = None
@@ -293,34 +174,49 @@ def send_email_to_segment(segment_name, subject, message, sender_email=None, sen
                 continue
 
             default_unsubscribe_method = "/api/method/frappe.email.queue.unsubscribe?email={{ recipient }}"
+            
+            # --- START: RENDER MESSAGE FOR CURRENT LEAD ---
+            template_context = {
+                "lead_name": getattr(lead_doc, "lead_name", "") or getattr(lead_doc, "name", ""),
+                "company_name": getattr(lead_doc, "company_name", ""),
+                "email": recipient_email,
+                "mobile_no": getattr(lead_doc, "mobile_no", ""),
+                "sender_signature": frappe.get_value("User", frappe.session.user, "full_name") or sender_email,
+            }
+            
+            # 1. RENDER THE JINJA TEMPLATE to get the final message content
+            rendered_message = frappe.render_template(message, template_context)
+            # --- END: RENDER MESSAGE ---
 
-            # Create Email Queue with cleaned message (WITHOUT pixel yet)
+            # Create email queue first to get the queue name
             email_queue = frappe.get_doc({
                 "doctype": "Email Queue",
                 "priority": 1,
                 "status": "Not Sent",
                 "reference_doctype": "CRM Lead",
                 "reference_name": lead_doc.name,
-                "message": cleaned_message,  # Use cleaned message
+                "message": rendered_message, # Use RENDERED message as initial content
                 "sender": sender_email,
                 "send_after": send_after_datetime if not send_now else now_datetime(),
                 "recipients": [{"recipient": recipient_email}],
-                "subject": subject,
+                "subject": frappe.render_template(subject, template_context), # Render subject too
                 "unsubscribe_method": default_unsubscribe_method,
-                "is_html": 1
+                "send_html_email": 1,
+                "content_type": "text/html" 
             }).insert(ignore_permissions=True)
             frappe.db.commit()
 
             # Create tracker
             tracker = create_lead_email_tracker(lead_doc.name, email_queue.name, initial_status="Queued")
 
-            # NOW inject tracking pixel into the cleaned message
-            message_with_pixel = inject_tracking_pixel(cleaned_message, email_queue.name)
+            # NOW inject tracking pixel into the rendered message
+            # The inject_tracking_pixel function will ensure the pixel is correctly nested
+            message_with_pixel = inject_tracking_pixel(rendered_message, email_queue.name)
             
             # Log for debugging
             frappe.logger().info(f"Message with pixel length: {len(message_with_pixel)}")
             
-            # Update email queue with pixel
+            # Update email queue with pixel-injected message
             email_queue.message = message_with_pixel
             email_queue.save(ignore_permissions=True)
             frappe.db.commit()
@@ -333,11 +229,12 @@ def send_email_to_segment(segment_name, subject, message, sender_email=None, sen
                 try:
                     email_queue.reload()
                     email_queue.send()
-                    update_tracker_on_email_send(email_queue.name)
+                    # You must import these functions from email_tracker.py or define them
+                    # update_tracker_on_email_send(email_queue.name) 
                     status = "sent"
                     msg = "Email sent immediately with tracking"
                 except Exception as send_error:
-                    update_tracker_on_email_error(email_queue.name, str(send_error))
+                    # update_tracker_on_email_error(email_queue.name, str(send_error))
                     status = "error"
                     msg = f"Failed to send email: {str(send_error)}"
                     frappe.log_error(title="Email Send Failed", message=f"Lead: {lead_doc.name}\nEmail: {recipient_email}\nError: {str(send_error)}")
@@ -347,8 +244,8 @@ def send_email_to_segment(segment_name, subject, message, sender_email=None, sen
                 "doctype": "Communication",
                 "communication_type": "Communication",
                 "communication_medium": "Email",
-                "subject": subject,
-                "content": message_with_pixel,
+                "subject": frappe.render_template(subject, template_context), # Render subject for communication
+                "content": message_with_pixel, # Use the final HTML content with pixel
                 "sender": sender_email,
                 "recipients": recipient_email,
                 "status": "Linked",
@@ -382,7 +279,6 @@ def send_email_to_segment(segment_name, subject, message, sender_email=None, sen
             })
 
     return {"segment_id": segment.name, "segment_name": segment.segmentname, "results": responses}
-
 
 @frappe.whitelist()
 def launch_campaign(campaign_name: str, segment_name: str, sender_email: str, start_datetime=None):
@@ -441,7 +337,7 @@ def launch_campaign(campaign_name: str, segment_name: str, sender_email: str, st
             result = send_email_to_segment(
                 segment_name=segment_name,
                 subject=template_doc.subject,
-                message=template_doc.response,
+                message=template_doc.response or template_doc.message or "",
                 sender_email=sender_email,
                 send_now=False,
                 send_after_datetime=send_time
