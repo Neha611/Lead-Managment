@@ -57,6 +57,39 @@ def on_email_queue_after_insert(doc, method):
         )
         
         if tracker:
+            if tracker.communication:
+                try:
+                    comm = frappe.get_doc("Communication", tracker.communication)
+                    comm.db_set("status", "Queued" if doc.status != "Sent" else "Sent")
+                    comm.db_set("delivery_status", "Queued")
+                    frappe.logger().info(f"[Tracker Update] Communication {comm.name} -> {"Queued" if doc.status != "Sent" else "Sent"}")
+
+                    # Notify UI updates
+                    comm.notify_change("update")
+                    frappe.publish_realtime(
+                        "list_update",
+                        {
+                            "doctype": "Communication",
+                            "name": comm.name,
+                            "delivery_status": "Queued" if doc.status != "Sent" else "Sent"
+                        },
+                        after_commit=True
+                    )
+
+                    if comm.reference_doctype and comm.reference_name:
+                        frappe.publish_realtime(
+                            "docinfo_update",
+                            {
+                                "doc": comm.as_dict(),
+                                "key": "communications",
+                                "action": "update"
+                            },
+                            doctype=comm.reference_doctype,
+                            docname=comm.reference_name,
+                            after_commit=True
+                        )
+                except Exception as comm_error:
+                    frappe.logger().error(f"[Tracker Update] Failed to update Communication for {tracker.name}: {str(comm_error)}")
             frappe.db.commit()
             frappe.logger().info(f"[Hook] Lead Email Tracker created: {tracker.name}")
         else:
@@ -74,7 +107,7 @@ def inject_pixel_into_mime_message(message, email_queue_name):
     Handles quoted-printable encoding properly.
     """
     # Generate the tracking pixel HTML
-    base_url = frappe.utils.get_url()
+    base_url = "https://attended-grades-par-internal.trycloudflare.com"
     tracking_url = f"{base_url}/api/method/crm_override.crm_override.email_tracker.email_tracker?name={email_queue_name}"
     pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none;" alt=""/>'
     
@@ -231,9 +264,9 @@ def update_tracker_status_direct(email_queue_name, status, error_message=None):
     Uses SQL to avoid ORM overhead and ensure updates happen.
     """
     try:
-        # Check if tracker exists
+        # Fetch tracker info (include communication link)
         tracker = frappe.db.sql("""
-            SELECT name, status 
+            SELECT name, status, communication 
             FROM `tabLead Email Tracker` 
             WHERE email_queue_status = %s
             LIMIT 1
@@ -245,17 +278,18 @@ def update_tracker_status_direct(email_queue_name, status, error_message=None):
             )
             return
         
-        tracker_name = tracker[0].name
-        old_status = tracker[0].status
-        
-        # Don't downgrade status (e.g., Opened -> Sent)
+        tracker = tracker[0]
+        tracker_name = tracker.name
+        old_status = tracker.status
+
+        # Don’t downgrade status (e.g., Opened -> Sent)
         if old_status == "Opened" and status == "Sent":
             frappe.logger().info(
                 f"[Tracker Update] Skipping update - tracker already Opened: {tracker_name}"
             )
             return
         
-        # Build update query
+        # --- Update Lead Email Tracker ---
         if status == "Sent":
             frappe.db.sql("""
                 UPDATE `tabLead Email Tracker`
@@ -266,10 +300,8 @@ def update_tracker_status_direct(email_queue_name, status, error_message=None):
                 WHERE name = %s
             """, ("Sent", now_datetime(), now_datetime(), frappe.session.user, tracker_name))
             
-            frappe.logger().info(
-                f"[Tracker Update] ✓ Updated {tracker_name}: {old_status} -> Sent"
-            )
-            
+            frappe.logger().info(f"[Tracker Update] ✓ Updated {tracker_name}: {old_status} -> Sent")
+        
         elif status == "Failed":
             frappe.db.sql("""
                 UPDATE `tabLead Email Tracker`
@@ -282,13 +314,46 @@ def update_tracker_status_direct(email_queue_name, status, error_message=None):
             """, ("Failed", error_message, now_datetime(), now_datetime(), 
                   frappe.session.user, tracker_name))
             
-            frappe.logger().info(
-                f"[Tracker Update] ✓ Updated {tracker_name}: {old_status} -> Failed"
-            )
-        
-        # Commit immediately
+            frappe.logger().info(f"[Tracker Update] ✓ Updated {tracker_name}: {old_status} -> Failed")
+
+        # --- 🔥 New Block: Sync Communication Document ---
+        if tracker.communication:
+            try:
+                comm = frappe.get_doc("Communication", tracker.communication)
+                comm.db_set("status", status)
+                comm.db_set("delivery_status", status)
+                frappe.logger().info(f"[Tracker Update] Communication {comm.name} -> {status}")
+
+                # Notify UI updates
+                comm.notify_change("update")
+                frappe.publish_realtime(
+                    "list_update",
+                    {
+                        "doctype": "Communication",
+                        "name": comm.name,
+                        "delivery_status": status
+                    },
+                    after_commit=True
+                )
+
+                if comm.reference_doctype and comm.reference_name:
+                    frappe.publish_realtime(
+                        "docinfo_update",
+                        {
+                            "doc": comm.as_dict(),
+                            "key": "communications",
+                            "action": "update"
+                        },
+                        doctype=comm.reference_doctype,
+                        docname=comm.reference_name,
+                        after_commit=True
+                    )
+            except Exception as comm_error:
+                frappe.logger().error(f"[Tracker Update] Failed to update Communication for {tracker_name}: {str(comm_error)}")
+
+        # --- Commit All Changes ---
         frappe.db.commit()
-        
+
     except Exception as e:
         frappe.log_error(
             title="Direct Tracker Update Error",

@@ -1,37 +1,80 @@
 import frappe
 from frappe.utils import now_datetime
 
+
 @frappe.whitelist(allow_guest=True)
 def email_tracker(name):
     """
     Called when email tracking pixel is hit.
-    Updates Lead Email Tracker to 'Opened' and keeps Email Queue/Communication consistent.
+    Updates Lead Email Tracker, Communication, and Email Queue.
     Returns a 1x1 GIF.
     """
     try:
         frappe.logger().info(f"[crm_override] Pixel hit for Email Queue: {name}")
 
-        # Fetch trackers
-        trackers = frappe.get_all(
+        # --- Fetch tracker ---
+        tracker = frappe.db.get_value(
             "Lead Email Tracker",
-            filters={"email_queue_status": name},
-            fields=["name", "status"]
+            {"email_queue_status": name},
+            ["name", "status", "communication"],
+            as_dict=True,
         )
 
-        if trackers:
-            for tr in trackers:
-                if tr.get("status") != "Opened":
-                    frappe.db.sql("""
-                        UPDATE `tabLead Email Tracker`
-                        SET `status`=%s, `opened_at`=%s, `modified`=%s
-                        WHERE `name`=%s
-                    """, ("Opened", now_datetime(), now_datetime(), tr["name"]))
-                    frappe.logger().info(f"[crm_override] Updated tracker {tr['name']} -> Opened")
-            frappe.db.commit()
+        if tracker:
+            if tracker.status != "Opened":
+                # Update Lead Email Tracker
+                frappe.db.sql("""
+                    UPDATE `tabLead Email Tracker`
+                    SET status=%s, opened_at=%s, modified=%s
+                    WHERE name=%s
+                """, ("Opened", now_datetime(), now_datetime(), tracker.name))
+
+                # Update Communication if linked - USE PROPER METHOD
+                if tracker.communication:
+                    # Get the Communication document
+                    comm = frappe.get_doc("Communication", tracker.communication)
+                    
+                    # Use db_set which triggers notify_update automatically
+                    comm.db_set("status", "Opened")
+                    comm.db_set("delivery_status", "Opened")
+                    print(f"Updated Communication {comm.name} status to Opened")
+                    print(comm.as_dict())
+                    
+                    # CRITICAL: Trigger notify_change for timeline/activity updates
+                    comm.notify_change("update")
+                    
+                    # Also publish realtime event for list view updates
+                    frappe.publish_realtime(
+                        "list_update",
+                        {
+                            "doctype": "Communication",
+                            "name": tracker.communication,
+                            "delivery_status" : "Opened"
+                        },
+                        after_commit=True
+                    )
+                    
+                    # Update reference document's timeline if exists
+                    if comm.reference_doctype and comm.reference_name:
+                        print("timeline update")
+                        frappe.publish_realtime(
+                            "docinfo_update",
+                            {
+                                "doc": comm.as_dict(),
+                                "key": "communications",
+                                "action": "update"
+                            },
+                            doctype=comm.reference_doctype,
+                            docname=comm.reference_name,
+                            after_commit=True
+                        )
+
+                frappe.db.commit()
+                frappe.logger().info(f"[crm_override] Updated tracker {tracker.name} and communication {tracker.communication} -> Opened")
         else:
             frappe.logger().warning(f"[crm_override] No Lead Email Tracker found for Email Queue: {name}")
 
-        # Update Email Queue status via frappe internal helper
+        # --- Update Email Queue status via Frappe helper ---
         try:
             from frappe.email.doctype.email_queue.email_queue import update_email_status
             update_email_status(name)
@@ -41,7 +84,7 @@ def email_tracker(name):
                 message=f"Failed to call update_email_status for {name}: {str(e)}\n{frappe.get_traceback()}"
             )
 
-        # Return 1x1 transparent GIF
+        # --- Return 1x1 transparent GIF ---
         frappe.response.type = "image/gif"
         frappe.response.filecontent = (
             b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00'
@@ -60,24 +103,60 @@ def email_tracker(name):
 
 
 def update_tracker_on_email_send(email_queue_name):
-    """
-    Update tracker when Email Queue moves to Sent.
-    Uses direct SQL to avoid permission issues.
-    """
+    """Update tracker + communication when Email Queue moves to Sent."""
+    print("update_tracker_on_email_send called")
     try:
-        trackers = frappe.get_all(
+        tracker = frappe.db.get_value(
             "Lead Email Tracker",
-            filters={"email_queue_status": email_queue_name},
-            fields=["name", "status"]
+            {"email_queue_status": email_queue_name},
+            ["name", "communication"],
+            as_dict=True,
         )
 
-        for tr in trackers:
+        if tracker:
             frappe.db.sql("""
                 UPDATE `tabLead Email Tracker`
-                SET `status`=%s, `last_sent_on`=%s, `modified`=%s
-                WHERE `name`=%s
-            """, ("Sent", now_datetime(), now_datetime(), tr["name"]))
-        frappe.db.commit()
+                SET status=%s, last_sent_on=%s, modified=%s
+                WHERE name=%s
+            """, ("Sent", now_datetime(), now_datetime(), tracker.name))
+
+            if tracker.communication:
+                # Get the Communication document
+                comm = frappe.get_doc("Communication", tracker.communication)
+                
+                # Use db_set instead of raw SQL
+                comm.db_set("status", "Sent")
+                comm.db_set("delivery_status", "Sent")
+                print(f"Updated Communication {comm.name} status to Sent")
+                print(comm.as_dict())
+                # Trigger notify_change for timeline updates
+                comm.notify_change("update")
+                
+                # Publish realtime event
+                frappe.publish_realtime(
+                    "list_update",
+                    {
+                        "doctype": "Communication",
+                        "name": tracker.communication,
+                        "delivery_status" : "Sent"
+                    },
+                    after_commit=True
+                )
+                if comm.reference_doctype and comm.reference_name:
+                        print("timeline update")
+                        frappe.publish_realtime(
+                            "docinfo_update",
+                            {
+                                "doc": comm.as_dict(),
+                                "key": "communications",
+                                "action": "update"
+                            },
+                            doctype=comm.reference_doctype,
+                            docname=comm.reference_name,
+                            after_commit=True
+                        )
+
+            frappe.db.commit()
 
     except Exception as e:
         frappe.log_error(
@@ -87,23 +166,46 @@ def update_tracker_on_email_send(email_queue_name):
 
 
 def update_tracker_on_email_error(email_queue_name, error_message):
-    """
-    Update tracker when Email Queue enters Error/Expired/Cancelled.
-    """
+    """Update tracker + communication when Email Queue enters Error/Expired/Cancelled."""
     try:
-        trackers = frappe.get_all(
+        tracker = frappe.db.get_value(
             "Lead Email Tracker",
-            filters={"email_queue_status": email_queue_name},
-            fields=["name"]
+            {"email_queue_status": email_queue_name},
+            ["name", "communication"],
+            as_dict=True,
         )
 
-        for tr in trackers:
+        if tracker:
             frappe.db.sql("""
                 UPDATE `tabLead Email Tracker`
-                SET `status`=%s, `error_message`=%s, `last_sent_on`=%s, `modified`=%s
-                WHERE `name`=%s
-            """, ("Failed", error_message, now_datetime(), now_datetime(), tr["name"]))
-        frappe.db.commit()
+                SET status=%s, error_message=%s, last_sent_on=%s, modified=%s
+                WHERE name=%s
+            """, ("Failed", error_message, now_datetime(), now_datetime(), tracker.name))
+
+            if tracker.communication:
+                # Get the Communication document
+                comm = frappe.get_doc("Communication", tracker.communication)
+                
+                # Use db_set instead of raw SQL
+                comm.db_set("status", "Failed")
+                comm.db_set("delivery_status", "Failed")
+                print(f"Updated Communication {comm.name} status to Failed")
+                print(comm.as_dict())
+                # Trigger notify_change for timeline updates
+                comm.notify_change("update")
+                
+                # Publish realtime event
+                frappe.publish_realtime(
+                    "list_update",
+                    {
+                        "doctype": "Communication",
+                        "name": tracker.communication,
+                        "delivery_status" : "Failed"
+                    },
+                    after_commit=True
+                )
+
+            frappe.db.commit()
 
     except Exception as e:
         frappe.log_error(

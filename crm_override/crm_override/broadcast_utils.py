@@ -51,7 +51,7 @@ def inject_tracking_pixel(message, email_queue_name=None, communication_name=Non
         return message
 
     # ✅ Use Cloudflare Tunnel URL
-    base_url = "https://stocks-open-reduction-realized.trycloudflare.com"
+    base_url = "https://attended-grades-par-internal.trycloudflare.com"
     tracking_url = f"{base_url}/api/method/crm_override.crm_override.email_tracker.email_tracker?name={tracker_id}"
 
     pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none;" alt=""/>'
@@ -143,42 +143,6 @@ def create_lead_email_tracker(lead_name, email_queue_name=None, communication_na
                    f"{frappe.get_traceback()}"
         )
         return None
-
-def update_tracker_status(email_queue_name, status, error_message=None):
-    """
-    Helper function to update tracker status
-    """
-    try:
-        trackers = frappe.get_all(
-            "Lead Email Tracker",
-            filters={"email_queue_status": email_queue_name},
-            fields=["name"]
-        )
-        
-        for tr in trackers:
-            update_dict = {
-                "status": status,
-                "modified": now_datetime()
-            }
-            
-            if status == "Sent":
-                update_dict["last_sent_on"] = now_datetime()
-            
-            if error_message:
-                update_dict["error_message"] = error_message
-            
-            frappe.db.set_value("Lead Email Tracker", tr["name"], update_dict)
-        
-        frappe.db.commit()
-        
-        frappe.logger().info(f"Updated tracker status to {status} for {email_queue_name}")
-        
-    except Exception as e:
-        frappe.log_error(
-            title="Tracker Status Update Error",
-            message=f"Email Queue: {email_queue_name}\nStatus: {status}\nError: {str(e)}\n{frappe.get_traceback()}"
-        )
-
 
 @frappe.whitelist()
 def send_email_to_segment(segment_name=None, lead_name=None, subject=None, message=None, sender_email=None, send_now=False, send_after_datetime=None):
