@@ -13,7 +13,7 @@ class CampaignEmailSchedule(Document):
 	from typing import TYPE_CHECKING
 
 	if TYPE_CHECKING:
-		from frappe.types import DF
+		from frappe.frappe.types import DF
 
 		email_template: DF.Link
 		parent: DF.Data

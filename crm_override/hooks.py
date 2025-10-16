@@ -147,13 +147,34 @@ app_include_js = [
 
 scheduler_events = {
     "all": [
-        "crm_override.crm_override.doctype.email_campaign.email_campaign.process_email_campaigns"
+        "crm_override.crm_override.doctype.email_campaign.email_campaign.process_email_campaigns",
+        "frappe.email.doctype.email_account.email_account.pull"
     ],
 }
 
 # tracker
+doc_events = {
+    "Email Queue": {
+        "after_insert": "crm_override.crm_override.email_queue_hooks.on_email_queue_after_insert",
+        "before_save": "crm_override.crm_override.email_queue_hooks.on_email_queue_before_save",
+        "after_save": "crm_override.crm_override.email_queue_hooks.on_email_queue_after_save",
+        "on_update": "crm_override.crm_override.email_queue_hooks.on_email_queue_on_update",
+        "on_change": "crm_override.crm_override.email_queue_hooks.on_email_queue_on_change"
+    }
+}
+
+# Scheduled Tasks - Run tracker sync every 5 minutes
+scheduler_events = {
+    "cron": {
+        "*/5 * * * *": [
+            "crm_override.crm_override.tracker_sync.sync_email_tracker_status",
+            "frappe.email.doctype.email_account.email_account.pull"
+        ]
+    }
+}
+
 override_whitelisted_methods = {
-    "frappe.email.queue.email_tracker": "crm_override.crm_override.email_tracker"
+    "frappe.email.queue.email_tracker": "crm_override.crm_override.email_tracker.email_tracker"
 }
 
 
