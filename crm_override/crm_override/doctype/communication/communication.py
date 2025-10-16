@@ -152,10 +152,10 @@ class Communication(BaseCommunication):
 	def after_insert(self):
 		"""Override to ensure proper linking after insert"""
 		super().after_insert()
-		
+
 		# If this is a received email and still not linked, try one more time
 		if (
-			self.communication_medium == "Email" 
+			self.communication_medium == "Email"
 			and self.sent_or_received == "Received"
 			and not self.reference_doctype
 		):
@@ -173,6 +173,69 @@ class Communication(BaseCommunication):
 					update_modified=False
 				)
 				frappe.logger().info(f"After insert: Linked Communication {self.name} to {self.reference_doctype}: {self.reference_name}")
+
+		# Delete original message if this is a reply
+		self.delete_original_message_on_reply()
+
+	def delete_original_message_on_reply(self):
+		"""
+		Delete the original message when a reply is received.
+		Only keeps the latest reply in the conversation thread.
+		"""
+		# Only process received emails that are replies
+		if (
+			self.communication_medium != "Email"
+			or self.sent_or_received != "Received"
+			or not self.in_reply_to
+		):
+			return
+
+		try:
+			# in_reply_to contains the Communication name (not message_id) in Frappe
+			# So we can directly use it to get the original communication
+			original_comm = frappe.get_doc("Communication", self.in_reply_to)
+
+			# Only delete if the original was sent by us (not another received email)
+			if original_comm.sent_or_received == "Sent":
+				# Unlink from all linked documents first
+				self._unlink_communication_from_linked_docs(original_comm.name)
+
+				# Commit the unlinking before attempting delete
+				frappe.db.commit()
+
+				# Now delete the communication
+				frappe.delete_doc("Communication", original_comm.name, ignore_permissions=True, force=True)
+				frappe.db.commit()  # Commit the deletion
+				frappe.logger().info(
+					f"Deleted original message {original_comm.name} after receiving reply {self.name}"
+				)
+		except frappe.DoesNotExistError:
+			# Original communication not found - this is okay, maybe already deleted
+			frappe.logger().info(f"Original communication {self.in_reply_to} not found for reply {self.name}")
+		except Exception as e:
+			# Log error but don't fail the entire process
+			frappe.log_error(
+				f"Failed to delete original message for reply {self.name}: {str(e)}",
+				"Delete Original Message Error"
+			)
+
+	def _unlink_communication_from_linked_docs(self, communication_name):
+		"""Unlink communication from Lead Email Tracker and other linked records."""
+		# Direct SQL updates for known link fields
+		known_links = [
+			("Lead Email Tracker", "communication"),
+			("Email Queue", "communication"),
+			("Communication", "in_reply_to"),
+		]
+
+		for doctype, fieldname in known_links:
+			try:
+				frappe.db.sql(
+					f"UPDATE `tab{doctype}` SET `{fieldname}` = NULL WHERE `{fieldname}` = %s",
+					(communication_name,)
+				)
+			except Exception:
+				pass  # Ignore if table doesn't exist
 
 
 def update_parent_document_on_communication(doc):
