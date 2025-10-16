@@ -13,7 +13,8 @@
   "last_sent_on",
   "opened_at",
   "resend_count",
-  "error_message"
+  "error_message",
+  "communication"
  ],
  "fields": [
   {
@@ -71,12 +72,18 @@
    "fieldname": "error_message",
    "fieldtype": "Text",
    "label": "Error Message"
+  },
+  {
+   "fieldname": "communication",
+   "fieldtype": "Link",
+   "label": "Communication",
+   "options": "Communication"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-10-09 13:33:27.841422",
+ "modified": "2025-10-15 12:45:44.810261",
  "modified_by": "Administrator",
  "module": "CRM Override",
  "name": "Lead Email Tracker",

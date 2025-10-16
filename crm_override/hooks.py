@@ -147,7 +147,8 @@ app_include_js = [
 
 scheduler_events = {
     "all": [
-        "crm_override.crm_override.doctype.email_campaign.email_campaign.process_email_campaigns"
+        "crm_override.crm_override.doctype.email_campaign.email_campaign.process_email_campaigns",
+        "frappe.email.doctype.email_account.email_account.pull"
     ],
 }
 
@@ -166,7 +167,8 @@ doc_events = {
 scheduler_events = {
     "cron": {
         "*/5 * * * *": [
-            "crm_override.crm_override.tracker_sync.sync_email_tracker_status"
+            "crm_override.crm_override.tracker_sync.sync_email_tracker_status",
+            "frappe.email.doctype.email_account.email_account.pull"
         ]
     }
 }
