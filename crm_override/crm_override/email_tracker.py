@@ -76,13 +76,16 @@ def email_tracker(name):
 
         # --- Update Email Queue status via Frappe helper ---
         try:
-            from frappe.email.doctype.email_queue.email_queue import update_email_status
-            update_email_status(name)
+            # Fetch Email Queue doc and update status
+            email_queue = frappe.get_doc("Email Queue", name)
+            email_queue.db_set("status", "Sent")  # or "Opened"
+            frappe.db.commit()
         except Exception as e:
             frappe.log_error(
                 title="Email Queue Status Update Error",
-                message=f"Failed to call update_email_status for {name}: {str(e)}\n{frappe.get_traceback()}"
+                message=f"Failed to update Email Queue status for {name}: {str(e)}\n{frappe.get_traceback()}"
             )
+
 
         # --- Return 1x1 transparent GIF ---
         frappe.response.type = "image/gif"

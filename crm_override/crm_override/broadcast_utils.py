@@ -5,6 +5,7 @@ from frappe.email.doctype.email_template.email_template import get_email_templat
 from frappe.utils import cint
 from frappe.email.email_body import get_email
 from frappe.email.doctype.email_account.email_account import EmailAccount
+from urllib.parse import quote
 from frappe.utils import validate_email_address
 from crm_override.crm_override.email_tracker import update_tracker_on_email_send, update_tracker_on_email_error
 
@@ -50,9 +51,8 @@ def inject_tracking_pixel(message, email_queue_name=None, communication_name=Non
         # Fallback: if neither is provided, just return message as-is
         return message
 
-    # ✅ Use Cloudflare Tunnel URL
-    base_url = "https://attended-grades-par-internal.trycloudflare.com"
-    tracking_url = f"{base_url}/api/method/crm_override.crm_override.email_tracker.email_tracker?name={tracker_id}"
+    base_url = "https://furniture-spend-discover-traditions.trycloudflare.com"
+    tracking_url = f"{base_url}/api/method/crm_override.crm_override.email_tracker.email_tracker?name={quote(tracker_id)}"
 
     pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none;" alt=""/>'
 
@@ -308,7 +308,7 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
                 "communication_type": "Communication",
                 "communication_medium": "Email",
                 "subject": rendered_subject,
-                "content": message_with_pixel,
+                "content": rendered_message,
                 "sender": sender_email,
                 "recipients": recipient_email,
                 "status": "Linked",
@@ -331,18 +331,52 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
             
             # ✅ Now update the tracker with the Communication link
             if tracker:
-                frappe.db.set_value(
-                    "Lead Email Tracker",
-                    tracker.name,
-                    "communication",
-                    comm.name,
-                    update_modified=False
-                )
+                print("Updating tracker with communication link")
+                tracker.db_set("communication", comm.name, update_modified=False)
                 frappe.logger().info(f"[Campaign] Updated tracker {tracker.name} with communication: {comm.name}")
             
             frappe.db.commit()
-            comm.notify_update() #update instances in frontend
-            print("update called")
+            tracker.reload()
+            if tracker.communication:
+                try:
+                    comm = frappe.get_doc("Communication", tracker.communication)
+                    new_status = "Queued" 
+
+                    # Update DB fields
+                    comm.db_set("status", new_status, update_modified=False)
+                    comm.db_set("delivery_status", new_status, update_modified=False)
+                    frappe.logger().info(f"[Tracker Update] Communication {comm.name} -> {new_status}")
+
+                    # Notify real-time updates (list + docinfo)
+                    comm.notify_change("update")
+                    frappe.publish_realtime(
+                        "list_update",
+                        {
+                            "doctype": "Communication",
+                            "name": comm.name,
+                            "delivery_status": new_status,
+                        },
+                        after_commit=True,
+                    )
+
+                    if comm.reference_doctype and comm.reference_name:
+                        frappe.publish_realtime(
+                            "docinfo_update",
+                            {
+                                "doc": comm.as_dict(),
+                                "key": "communications",
+                                "action": "update",
+                            },
+                            doctype=comm.reference_doctype,
+                            docname=comm.reference_name,
+                            after_commit=True,
+                        )
+
+                except Exception as comm_error:
+                    frappe.logger().error(
+                        f"[Tracker Update] Failed to update Communication for tracker {tracker.name}: {str(comm_error)}"
+                    )
+            frappe.db.commit()
             
             responses.append({
                 "lead": lead_id,

@@ -2,6 +2,7 @@ import frappe
 from frappe.utils import now_datetime
 import re
 import quopri
+from urllib.parse import quote
 
 def on_email_queue_after_insert(doc, method):
     """
@@ -107,9 +108,10 @@ def inject_pixel_into_mime_message(message, email_queue_name):
     Handles quoted-printable encoding properly.
     """
     # Generate the tracking pixel HTML
-    base_url = "https://attended-grades-par-internal.trycloudflare.com"
-    tracking_url = f"{base_url}/api/method/crm_override.crm_override.email_tracker.email_tracker?name={email_queue_name}"
+    base_url = "https://furniture-spend-discover-traditions.trycloudflare.com"
+    tracking_url = f"{base_url}/api/method/crm_override.crm_override.email_tracker.email_tracker?name={quote(email_queue_name)}"
     pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none;" alt=""/>'
+    print("tracking_url:", tracking_url)
     
     frappe.logger().info(f"[Pixel Injection] Tracking URL: {tracking_url}")
     
@@ -182,6 +184,7 @@ def on_email_queue_before_save(doc, method):
     try:
         # Store the old status before it changes
         if not doc.is_new():
+            print("Before Save Hook Triggered for Email Queue:", doc.name , "New Status:", doc.status)
             old_status = frappe.db.get_value("Email Queue", doc.name, "status")
             if old_status and old_status != doc.status:
                 doc._status_changed = True
@@ -199,6 +202,7 @@ def on_email_queue_after_save(doc, method):
     try:
         # Check if status actually changed
         if hasattr(doc, '_status_changed') and doc._status_changed:
+            print("Status change detected:", doc._old_status, "->", doc.status)
             frappe.logger().info(
                 f"[Hook - After Save] Email Queue {doc.name} status changed to: {doc.status}"
             )
@@ -221,6 +225,7 @@ def on_email_queue_on_update(doc, method):
     """Called on update - additional hook"""
     try:
         if doc.has_value_changed("status"):
+            print("On Update Hook Triggered for Email Queue:", doc.name , "New Status:", doc.status)
             frappe.logger().info(
                 f"[Hook - On Update] Email Queue {doc.name} status: {doc.status}"
             )
@@ -316,14 +321,14 @@ def update_tracker_status_direct(email_queue_name, status, error_message=None):
             
             frappe.logger().info(f"[Tracker Update] ✓ Updated {tracker_name}: {old_status} -> Failed")
 
-        # --- 🔥 New Block: Sync Communication Document ---
+        # ---  New Block: Sync Communication Document ---
         if tracker.communication:
             try:
                 comm = frappe.get_doc("Communication", tracker.communication)
                 comm.db_set("status", status)
                 comm.db_set("delivery_status", status)
                 frappe.logger().info(f"[Tracker Update] Communication {comm.name} -> {status}")
-
+                # print(f"Updated Communication {comm.name} status to {status}")
                 # Notify UI updates
                 comm.notify_change("update")
                 frappe.publish_realtime(
@@ -350,8 +355,6 @@ def update_tracker_status_direct(email_queue_name, status, error_message=None):
                     )
             except Exception as comm_error:
                 frappe.logger().error(f"[Tracker Update] Failed to update Communication for {tracker_name}: {str(comm_error)}")
-
-        # --- Commit All Changes ---
         frappe.db.commit()
 
     except Exception as e:
