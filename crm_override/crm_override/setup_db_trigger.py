@@ -10,7 +10,7 @@ import frappe
 def setup_email_queue_trigger():
     """
     Creates a database trigger that automatically updates Lead Email Tracker
-    when Email Queue status changes. This is 100% reliable.
+    AND Communication when Email Queue status changes.
     """
     try:
         # Drop trigger if it exists
@@ -24,8 +24,11 @@ def setup_email_queue_trigger():
             AFTER UPDATE ON `tabEmail Queue`
             FOR EACH ROW
             BEGIN
+                DECLARE tracker_communication VARCHAR(255);
+                
                 -- When Email Queue changes to "Sent"
                 IF NEW.status = 'Sent' AND OLD.status != 'Sent' THEN
+                    -- Update Lead Email Tracker and get communication
                     UPDATE `tabLead Email Tracker`
                     SET 
                         status = 'Sent',
@@ -34,11 +37,28 @@ def setup_email_queue_trigger():
                     WHERE 
                         email_queue_status = NEW.name
                         AND status = 'Queued';
+                    
+                    -- Get the communication ID
+                    SELECT communication INTO tracker_communication
+                    FROM `tabLead Email Tracker`
+                    WHERE email_queue_status = NEW.name
+                    LIMIT 1;
+                    
+                    -- Update Communication if exists
+                    IF tracker_communication IS NOT NULL THEN
+                        UPDATE `tabCommunication`
+                        SET 
+                            status = 'Sent',
+                            delivery_status = 'Sent',
+                            modified = NOW()
+                        WHERE name = tracker_communication;
+                    END IF;
                 END IF;
                 
                 -- When Email Queue changes to Error/Expired/Cancelled
                 IF NEW.status IN ('Error', 'Expired', 'Cancelled') 
                    AND OLD.status NOT IN ('Error', 'Expired', 'Cancelled') THEN
+                    -- Update Lead Email Tracker
                     UPDATE `tabLead Email Tracker`
                     SET 
                         status = 'Failed',
@@ -48,6 +68,22 @@ def setup_email_queue_trigger():
                     WHERE 
                         email_queue_status = NEW.name
                         AND status != 'Failed';
+                    
+                    -- Get the communication ID
+                    SELECT communication INTO tracker_communication
+                    FROM `tabLead Email Tracker`
+                    WHERE email_queue_status = NEW.name
+                    LIMIT 1;
+                    
+                    -- Update Communication if exists
+                    IF tracker_communication IS NOT NULL THEN
+                        UPDATE `tabCommunication`
+                        SET 
+                            status = 'Failed',
+                            delivery_status = 'Failed',
+                            modified = NOW()
+                        WHERE name = tracker_communication;
+                    END IF;
                 END IF;
             END
         """
@@ -55,8 +91,7 @@ def setup_email_queue_trigger():
         frappe.db.sql(trigger_sql)
         frappe.db.commit()
         
-        print("✅ Database trigger created successfully!")
-        print("Lead Email Tracker will now update AUTOMATICALLY at database level.")
+        print("✅ Database trigger created successfully with Communication updates!")
         
         return {
             "success": True,
@@ -74,7 +109,6 @@ def setup_email_queue_trigger():
             "success": False,
             "message": error_msg
         }
-
 
 def remove_email_queue_trigger():
     """

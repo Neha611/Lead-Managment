@@ -51,7 +51,7 @@ def inject_tracking_pixel(message, email_queue_name=None, communication_name=Non
         # Fallback: if neither is provided, just return message as-is
         return message
 
-    base_url = "https://furniture-spend-discover-traditions.trycloudflare.com"
+    base_url = "https://ops.tradyon.ai"
     tracking_url = f"{base_url}/api/method/crm_override.crm_override.email_tracker.email_tracker?name={quote(tracker_id)}"
 
     pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none;" alt=""/>'
@@ -331,7 +331,6 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
             
             # ✅ Now update the tracker with the Communication link
             if tracker:
-                print("Updating tracker with communication link")
                 tracker.db_set("communication", comm.name, update_modified=False)
                 frappe.logger().info(f"[Campaign] Updated tracker {tracker.name} with communication: {comm.name}")
             

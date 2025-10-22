@@ -108,7 +108,7 @@ def inject_pixel_into_mime_message(message, email_queue_name):
     Handles quoted-printable encoding properly.
     """
     # Generate the tracking pixel HTML
-    base_url = "https://furniture-spend-discover-traditions.trycloudflare.com"
+    base_url = "https://ops.tradyon.ai"
     tracking_url = f"{base_url}/api/method/crm_override.crm_override.email_tracker.email_tracker?name={quote(email_queue_name)}"
     pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none;" alt=""/>'
     print("tracking_url:", tracking_url)
@@ -184,7 +184,6 @@ def on_email_queue_before_save(doc, method):
     try:
         # Store the old status before it changes
         if not doc.is_new():
-            print("Before Save Hook Triggered for Email Queue:", doc.name , "New Status:", doc.status)
             old_status = frappe.db.get_value("Email Queue", doc.name, "status")
             if old_status and old_status != doc.status:
                 doc._status_changed = True
@@ -196,170 +195,3 @@ def on_email_queue_before_save(doc, method):
     except Exception as e:
         frappe.logger().error(f"Error in before_save hook: {str(e)}")
 
-
-def on_email_queue_after_save(doc, method):
-    """Called after Email Queue is saved - guaranteed to fire"""
-    try:
-        # Check if status actually changed
-        if hasattr(doc, '_status_changed') and doc._status_changed:
-            print("Status change detected:", doc._old_status, "->", doc.status)
-            frappe.logger().info(
-                f"[Hook - After Save] Email Queue {doc.name} status changed to: {doc.status}"
-            )
-            
-            if doc.status == "Sent":
-                update_tracker_status_direct(doc.name, "Sent")
-                
-            elif doc.status in ["Error", "Expired", "Cancelled"]:
-                error_msg = doc.error or f"Email {doc.status}"
-                update_tracker_status_direct(doc.name, "Failed", error_msg)
-                
-    except Exception as e:
-        frappe.log_error(
-            title="Lead Email Tracker Auto-Update Error (After Save)",
-            message=f"Email Queue: {doc.name}\nError: {str(e)}\n{frappe.get_traceback()}"
-        )
-
-
-def on_email_queue_on_update(doc, method):
-    """Called on update - additional hook"""
-    try:
-        if doc.has_value_changed("status"):
-            print("On Update Hook Triggered for Email Queue:", doc.name , "New Status:", doc.status)
-            frappe.logger().info(
-                f"[Hook - On Update] Email Queue {doc.name} status: {doc.status}"
-            )
-            
-            if doc.status == "Sent":
-                update_tracker_status_direct(doc.name, "Sent")
-                
-            elif doc.status in ["Error", "Expired", "Cancelled"]:
-                error_msg = doc.error or f"Email {doc.status}"
-                update_tracker_status_direct(doc.name, "Failed", error_msg)
-                
-    except Exception as e:
-        frappe.log_error(
-            title="Lead Email Tracker Auto-Update Error (On Update)",
-            message=f"Email Queue: {doc.name}\nError: {str(e)}\n{frappe.get_traceback()}"
-        )
-
-
-def on_email_queue_on_change(doc, method):
-    """Called on any change - catches background updates"""
-    try:
-        if doc.has_value_changed("status"):
-            frappe.logger().info(
-                f"[Hook - On Change] Email Queue {doc.name} status changed to: {doc.status}"
-            )
-            
-            if doc.status == "Sent":
-                update_tracker_status_direct(doc.name, "Sent")
-                
-            elif doc.status in ["Error", "Expired", "Cancelled"]:
-                error_msg = doc.error or f"Email {doc.status}"
-                update_tracker_status_direct(doc.name, "Failed", error_msg)
-                
-    except Exception as e:
-        frappe.logger().error(f"Error in on_change hook: {str(e)}")
-
-
-def update_tracker_status_direct(email_queue_name, status, error_message=None):
-    """
-    Direct SQL update for tracker status - guaranteed to work even in background jobs.
-    Uses SQL to avoid ORM overhead and ensure updates happen.
-    """
-    try:
-        # Fetch tracker info (include communication link)
-        tracker = frappe.db.sql("""
-            SELECT name, status, communication 
-            FROM `tabLead Email Tracker` 
-            WHERE email_queue_status = %s
-            LIMIT 1
-        """, (email_queue_name,), as_dict=True)
-        
-        if not tracker:
-            frappe.logger().warning(
-                f"[Tracker Update] No tracker found for Email Queue: {email_queue_name}"
-            )
-            return
-        
-        tracker = tracker[0]
-        tracker_name = tracker.name
-        old_status = tracker.status
-
-        # Don’t downgrade status (e.g., Opened -> Sent)
-        if old_status == "Opened" and status == "Sent":
-            frappe.logger().info(
-                f"[Tracker Update] Skipping update - tracker already Opened: {tracker_name}"
-            )
-            return
-        
-        # --- Update Lead Email Tracker ---
-        if status == "Sent":
-            frappe.db.sql("""
-                UPDATE `tabLead Email Tracker`
-                SET status = %s, 
-                    last_sent_on = %s, 
-                    modified = %s,
-                    modified_by = %s
-                WHERE name = %s
-            """, ("Sent", now_datetime(), now_datetime(), frappe.session.user, tracker_name))
-            
-            frappe.logger().info(f"[Tracker Update] ✓ Updated {tracker_name}: {old_status} -> Sent")
-        
-        elif status == "Failed":
-            frappe.db.sql("""
-                UPDATE `tabLead Email Tracker`
-                SET status = %s,
-                    error_message = %s,
-                    last_sent_on = %s,
-                    modified = %s,
-                    modified_by = %s
-                WHERE name = %s
-            """, ("Failed", error_message, now_datetime(), now_datetime(), 
-                  frappe.session.user, tracker_name))
-            
-            frappe.logger().info(f"[Tracker Update] ✓ Updated {tracker_name}: {old_status} -> Failed")
-
-        # ---  New Block: Sync Communication Document ---
-        if tracker.communication:
-            try:
-                comm = frappe.get_doc("Communication", tracker.communication)
-                comm.db_set("status", status)
-                comm.db_set("delivery_status", status)
-                frappe.logger().info(f"[Tracker Update] Communication {comm.name} -> {status}")
-                # print(f"Updated Communication {comm.name} status to {status}")
-                # Notify UI updates
-                comm.notify_change("update")
-                frappe.publish_realtime(
-                    "list_update",
-                    {
-                        "doctype": "Communication",
-                        "name": comm.name,
-                        "delivery_status": status
-                    },
-                    after_commit=True
-                )
-
-                if comm.reference_doctype and comm.reference_name:
-                    frappe.publish_realtime(
-                        "docinfo_update",
-                        {
-                            "doc": comm.as_dict(),
-                            "key": "communications",
-                            "action": "update"
-                        },
-                        doctype=comm.reference_doctype,
-                        docname=comm.reference_name,
-                        after_commit=True
-                    )
-            except Exception as comm_error:
-                frappe.logger().error(f"[Tracker Update] Failed to update Communication for {tracker_name}: {str(comm_error)}")
-        frappe.db.commit()
-
-    except Exception as e:
-        frappe.log_error(
-            title="Direct Tracker Update Error",
-            message=f"Email Queue: {email_queue_name}\nStatus: {status}\n"
-                    f"Error: {str(e)}\n{frappe.get_traceback()}"
-        )
