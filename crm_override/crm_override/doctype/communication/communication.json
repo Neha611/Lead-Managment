@@ -51,6 +51,7 @@
   "timeline_links",
   "email_inbox",
   "message_id",
+  "thread_id",
   "uid",
   "imap_folder",
   "email_status",
@@ -366,13 +367,18 @@
    "fieldtype": "Check",
    "hidden": 1,
    "label": "Has  Attachment"
+  },
+  {
+   "fieldname": "thread_id",
+   "fieldtype": "Data",
+   "label": "Thread ID"
   }
  ],
  "icon": "fa fa-comment",
  "idx": 1,
  "links": [],
  "make_attachments_public": 1,
- "modified": "2025-10-16 18:00:57.664205",
+ "modified": "2025-10-27 11:36:25.621540",
  "modified_by": "Administrator",
  "module": "CRM Override",
  "name": "Communication",

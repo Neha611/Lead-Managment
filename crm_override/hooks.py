@@ -153,8 +153,7 @@ scheduler_events = {
     ],
     "cron": {
         "*/5 * * * *": [
-            "crm_override.crm_override.tracker_sync.sync_email_tracker_status",
-            "frappe.email.doctype.email_account.email_account.pull"
+            "crm_override.crm_override.tracker_sync.sync_email_tracker_status"
         ]
     }
 }
@@ -164,7 +163,12 @@ doc_events = {
     "Email Queue": {
         "after_insert": "crm_override.crm_override.email_queue_hooks.on_email_queue_after_insert",
         "before_save": "crm_override.crm_override.email_queue_hooks.on_email_queue_before_save",
+        "on_submit": "crm_override.crm_override.email_queue_hooks.on_email_queue_on_submit",
     }
+}
+
+override_doctype_class = {
+    "Communication": "crm_override.crm_override.doctype.communication.communication.Communication"
 }
 
 override_whitelisted_methods = {

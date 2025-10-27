@@ -63,7 +63,7 @@ def on_email_queue_after_insert(doc, method):
                     comm = frappe.get_doc("Communication", tracker.communication)
                     comm.db_set("status", "Queued" if doc.status != "Sent" else "Sent")
                     comm.db_set("delivery_status", "Queued")
-                    frappe.logger().info(f"[Tracker Update] Communication {comm.name} -> {"Queued" if doc.status != "Sent" else "Sent"}")
+                    frappe.logger().info(f'[Tracker Update] Communication {comm.name} -> {"Queued" if doc.status != "Sent" else "Sent"}')
 
                     # Notify UI updates
                     comm.notify_change("update")
@@ -195,3 +195,22 @@ def on_email_queue_before_save(doc, method):
     except Exception as e:
         frappe.logger().error(f"Error in before_save hook: {str(e)}")
 
+def on_email_queue_on_submit(doc, method):
+    """
+    Called when Email Queue is submitted (after sending).
+    Sync message_id to Communication for proper email threading.
+    """
+    if doc.communication and doc.message_id:
+        try:
+            frappe.db.set_value(
+                "Communication",
+                doc.communication,
+                "message_id",
+                doc.message_id,
+                update_modified=False
+            )
+            frappe.logger().info(
+                f"[Message ID Sync] Communication {doc.communication} updated with message_id: {doc.message_id}"
+            )
+        except Exception as e:
+            frappe.logger().error(f"[Message ID Sync] Failed: {str(e)}")
