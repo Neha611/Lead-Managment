@@ -65,11 +65,11 @@ class EmailCampaign(Document):
             frappe.throw(_("Sender is required"))
         if not self.recipient:
             frappe.throw(_("Recipient (Lead Segment) is required"))
-        
+        # UTM Campaign is optional, do not throw if missing
+        # if hasattr(self, 'utm_campaign') and not self.utm_campaign:
+        #     frappe.msgprint(_("UTM Campaign is not set. Proceeding without UTM tracking."), indicator="orange")
         # Allow start_date to be today or in the future
-        # Don't validate against past if it's being submitted now
         if self.start_date and getdate(self.start_date) < getdate(nowdate()):
-            # Only throw error if document is new or not being submitted
             if self.is_new() or self.docstatus == 0:
                 frappe.msgprint(
                     _("Start Date is in the past. Campaign will be scheduled immediately."),
@@ -90,7 +90,8 @@ class EmailCampaign(Document):
         try:
             self.status = self.status or "Scheduled"
 
-            if self.email_campaign_for == "Lead Segment":
+            # Support both Lead Segment and CRM Lead
+            if self.email_campaign_for in ["Lead Segment", "CRM Lead"]:
                 # Base start time
                 if self.start_date:
                     start_datetime = get_datetime(self.start_date)
@@ -104,16 +105,26 @@ class EmailCampaign(Document):
                     start_datetime = now_datetime()
 
                 frappe.logger().info(
-                    f"[Email Campaign] Launching campaign '{self.name}' for segment '{self.recipient}' at {start_datetime}"
+                    f"[Email Campaign] Launching campaign '{self.name}' for {self.email_campaign_for} '{self.recipient}' at {start_datetime}"
                 )
 
                 # Launch campaign
-                result = launch_campaign(
-                    campaign_name=self.campaign_name,
-                    segment_name=self.recipient,
-                    sender_email=self.sender,
-                    start_datetime=start_datetime
-                )
+                if self.email_campaign_for == "Lead Segment":
+                    result = launch_campaign(
+                        campaign_name=self.campaign_name,
+                        recipient_type="Lead Segment",
+                        recipient_id=self.recipient,
+                        sender_email=self.sender,
+                        start_datetime=start_datetime
+                    )
+                elif self.email_campaign_for == "CRM Lead":
+                    result = launch_campaign(
+                        campaign_name=self.campaign_name,
+                        recipient_type="CRM Lead",
+                        recipient_id=self.recipient,
+                        sender_email=self.sender,
+                        start_datetime=start_datetime
+                    )
 
                 self.db_set('status', 'Launched')
                 frappe.db.commit()

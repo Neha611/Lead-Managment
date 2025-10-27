@@ -147,13 +147,26 @@ app_include_js = [
 
 scheduler_events = {
     "all": [
-        "crm_override.crm_override.doctype.email_campaign.email_campaign.process_email_campaigns"
+        "crm_override.crm_override.doctype.email_campaign.email_campaign.process_email_campaigns",
+        "crm_override.crm_override.email_queue_hooks.sync_email_queue_to_tracker"
     ],
+    "cron": {
+        "*/5 * * * *": [
+            "crm_override.crm_override.tracker_sync.sync_email_tracker_status",
+        ]
+    }
 }
 
 # tracker
+doc_events = {
+    "Email Queue": {
+        "after_insert": "crm_override.crm_override.email_queue_hooks.on_email_queue_after_insert",
+        "before_save": "crm_override.crm_override.email_queue_hooks.on_email_queue_before_save",
+    }
+}
+
 override_whitelisted_methods = {
-    "frappe.email.queue.email_tracker": "crm_override.crm_override.email_tracker"
+    "frappe.email.queue.email_tracker": "crm_override.crm_override.email_tracker.email_tracker"
 }
 
 
