@@ -107,7 +107,7 @@ def inject_pixel_into_mime_message(message, email_queue_name):
     Handles quoted-printable encoding properly.
     """
     # Generate the tracking pixel HTML
-    base_url = "https://attended-grades-par-internal.trycloudflare.com"
+    base_url = "https://burst-realistic-ccd-jeffrey.trycloudflare.com"
     tracking_url = f"{base_url}/api/method/crm_override.crm_override.email_tracker.email_tracker?name={email_queue_name}"
     pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none;" alt=""/>'
     

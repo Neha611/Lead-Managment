@@ -51,7 +51,7 @@ def inject_tracking_pixel(message, email_queue_name=None, communication_name=Non
         return message
 
     # ✅ Use Cloudflare Tunnel URL
-    base_url = "https://attended-grades-par-internal.trycloudflare.com"
+    base_url = "https://burst-realistic-ccd-jeffrey.trycloudflare.com"
     tracking_url = f"{base_url}/api/method/crm_override.crm_override.email_tracker.email_tracker?name={tracker_id}"
 
     pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none;" alt=""/>'

@@ -191,8 +191,12 @@ class Communication(BaseCommunication):
 			return
 
 		try:
-			# in_reply_to contains the Communication name (not message_id) in Frappe
-			# So we can directly use it to get the original communication
+			# Check if the original communication exists first
+			if not frappe.db.exists("Communication", self.in_reply_to):
+				# Original not found - silently skip
+				return
+
+			# Get the original communication
 			original_comm = frappe.get_doc("Communication", self.in_reply_to)
 
 			# Only delete if the original was sent by us (not another received email)
@@ -205,19 +209,13 @@ class Communication(BaseCommunication):
 
 				# Now delete the communication
 				frappe.delete_doc("Communication", original_comm.name, ignore_permissions=True, force=True)
-				frappe.db.commit()  # Commit the deletion
+				frappe.db.commit()
 				frappe.logger().info(
 					f"Deleted original message {original_comm.name} after receiving reply {self.name}"
 				)
-		except frappe.DoesNotExistError:
-			# Original communication not found - this is okay, maybe already deleted
-			frappe.logger().info(f"Original communication {self.in_reply_to} not found for reply {self.name}")
-		except Exception as e:
-			# Log error but don't fail the entire process
-			frappe.log_error(
-				f"Failed to delete original message for reply {self.name}: {str(e)}",
-				"Delete Original Message Error"
-			)
+		except Exception:
+			# Silently skip all errors to prevent breaking email receive process
+			pass
 
 	def _unlink_communication_from_linked_docs(self, communication_name):
 		"""Unlink communication from Lead Email Tracker and other linked records."""
@@ -230,12 +228,30 @@ class Communication(BaseCommunication):
 
 		for doctype, fieldname in known_links:
 			try:
+				# Check if doctype/table exists before attempting update
+				if not frappe.db.table_exists(f"tab{doctype}"):
+					continue
+
 				frappe.db.sql(
 					f"UPDATE `tab{doctype}` SET `{fieldname}` = NULL WHERE `{fieldname}` = %s",
 					(communication_name,)
 				)
+			except frappe.db.TableMissingError:
+				# Table doesn't exist - silently skip
+				pass
+			except frappe.db.InternalError as e:
+				# Handle SQL errors like unknown column - silently skip
+				if "Unknown column" in str(e) or "doesn't exist" in str(e):
+					pass
+				else:
+					# Log unexpected SQL errors but don't fail
+					try:
+						frappe.logger().debug(f"SQL error unlinking {doctype}.{fieldname}: {str(e)}")
+					except Exception:
+						pass
 			except Exception:
-				pass  # Ignore if table doesn't exist
+				# Silently skip any other errors
+				pass
 
 
 def update_parent_document_on_communication(doc):
