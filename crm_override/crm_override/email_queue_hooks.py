@@ -63,7 +63,7 @@ def on_email_queue_after_insert(doc, method):
                     comm = frappe.get_doc("Communication", tracker.communication)
                     comm.db_set("status", "Queued" if doc.status != "Sent" else "Sent")
                     comm.db_set("delivery_status", "Queued")
-                    frappe.logger().info(f"[Tracker Update] Communication {comm.name} -> {"Queued" if doc.status != "Sent" else "Sent"}")
+                    frappe.logger().info(f'[Tracker Update] Communication {comm.name} -> {"Queued" if doc.status != "Sent" else "Sent"}')
 
                     # Notify UI updates
                     comm.notify_change("update")
