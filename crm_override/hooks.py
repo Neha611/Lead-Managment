@@ -153,7 +153,8 @@ scheduler_events = {
     ],
     "cron": {
         "*/5 * * * *": [
-            "crm_override.crm_override.tracker_sync.sync_email_tracker_status"
+            "crm_override.crm_override.tracker_sync.sync_email_tracker_status",
+            "crm_override.crm_override.email_tracker.sync_opens_from_sendgrid"
         ]
     }
 }
