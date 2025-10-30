@@ -153,16 +153,28 @@ scheduler_events = {
     "cron": {
         "*/5 * * * *": [
             "crm_override.crm_override.tracker_sync.sync_email_tracker_status",
+            "crm_override.crm_override.email_tracker.sync_opens_from_sendgrid"
+        ],
+        "*/2 * * * *": [
+            "crm_override.crm_override.email_threading.imap_fetcher.fetch_imap_emails"
         ]
     }
 }
 
-# tracker
 doc_events = {
+    "Communication": {
+        "before_save": "crm_override.crm_override.email_threading.outbound_email_threading.ensure_communication_has_thread_id"
+    },
     "Email Queue": {
         "after_insert": "crm_override.crm_override.email_queue_hooks.on_email_queue_after_insert",
         "before_save": "crm_override.crm_override.email_queue_hooks.on_email_queue_before_save",
+        "on_submit": "crm_override.crm_override.email_queue_hooks.on_email_queue_on_submit",
+        "before_insert": "crm_override.crm_override.email_threading.outbound_email_threading.add_thread_id_to_outbound_email"
     }
+}
+
+override_doctype_class = {
+    "Communication": "crm_override.crm_override.doctype.communication.communication.Communication"
 }
 
 override_whitelisted_methods = {

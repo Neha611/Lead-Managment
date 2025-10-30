@@ -8,6 +8,10 @@ from frappe.email.doctype.email_account.email_account import EmailAccount
 from urllib.parse import quote
 from frappe.utils import validate_email_address
 from crm_override.crm_override.email_tracker import update_tracker_on_email_send, update_tracker_on_email_error
+from crm_override.crm_override.email_threading.outbound_email_threading import (
+    ensure_communication_has_thread_id,
+    add_thread_id_to_outbound_email
+)
 
 def create_lead_segment(segmentname, lead_names, description=None):
     """
@@ -36,37 +40,6 @@ def list_lead_segments():
         fields=["name", "segmentname", "creation"],
         order_by="creation desc"
     )
-
-def inject_tracking_pixel(message, email_queue_name=None, communication_name=None):
-    """
-    Safely inject a tracking pixel at the end of the HTML body.
-    Works for both campaign emails (email_queue_name) and manual emails (communication_name).
-    """
-    if not message:
-        return message
-
-    # Determine unique identifier for tracking
-    tracker_id = email_queue_name or communication_name
-    if not tracker_id:
-        # Fallback: if neither is provided, just return message as-is
-        return message
-
-    base_url = "https://ops.tradyon.ai"
-    tracking_url = f"{base_url}/api/method/crm_override.crm_override.email_tracker.email_tracker?name={quote(tracker_id)}"
-
-    pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none;" alt=""/>'
-
-    message = str(message)
-    lower = message.lower()
-
-    if "</body>" in lower:
-        idx = lower.rfind("</body>")
-        return message[:idx] + pixel + message[idx:]
-    elif "</html>" in lower:
-        idx = lower.rfind("</html>")
-        return message[:idx] + pixel + message[idx:]
-    else:
-        return f"<html><body>{message}{pixel}</body></html>"
 
 def create_lead_email_tracker(lead_name, email_queue_name=None, communication_name=None, initial_status="Queued"):
     """
@@ -147,11 +120,7 @@ def create_lead_email_tracker(lead_name, email_queue_name=None, communication_na
 @frappe.whitelist()
 def send_email_to_segment(segment_name=None, lead_name=None, subject=None, message=None, sender_email=None, send_now=False, send_after_datetime=None):
     """
-    Send an email to:
-      - all leads in a Lead Segment (if segment_name given)
-      - or a single CRM Lead (if lead_name given)
-
-    Works with tracking, Email Queue, and Communication logs.
+    Send an email to leads with proper SendGrid tracking and status updates
     """
     # --- STEP 1: Validate input ---
     if not segment_name and not lead_name:
@@ -231,34 +200,28 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
             rendered_subject = frappe.render_template(subject, ctx)
             rendered_message = frappe.render_template(message, ctx)
 
-            mime_message = get_email(
-                subject=rendered_subject,
-                content=rendered_message,
-                recipients=[recipient_email],
-                sender=sender_email
-            )
-
-            unsubscribe_method = "/api/method/frappe.email.queue.unsubscribe"
-
+            # ✅ STEP 4.1: Create Email Queue FIRST (without message)
             email_queue = frappe.get_doc({
                 "doctype": "Email Queue",
                 "priority": 1,
                 "status": "Not Sent",
                 "reference_doctype": "CRM Lead",
                 "reference_name": lead_doc.name,
-                "message": mime_message.as_string(),
+                "message": "",  # Will be set after tracker creation
                 "sender": sender_email,
                 "send_after": send_after_datetime if not send_now else now_datetime(),
                 "recipients": [{"recipient": recipient_email}],
                 "subject": rendered_subject,
                 "send_html_email": 1,
                 "content_type": "multipart/alternative",
-                "unsubscribe_method": unsubscribe_method,
+                "unsubscribe_method": "/api/method/frappe.email.queue.unsubscribe",
             }).insert(ignore_permissions=True)
             frappe.db.commit()
 
-            # ✅ CRITICAL: Create tracker IMMEDIATELY after Email Queue insert
-            # This happens BEFORE the hook runs, preventing duplicates
+            frappe.logger().info(f"[Campaign] Created Email Queue: {email_queue.name}")
+            add_thread_id_to_outbound_email(email_queue)
+
+            # ✅ STEP 4.2: Create tracker IMMEDIATELY (BEFORE Communication)
             tracker = create_lead_email_tracker(
                 lead_doc.name,
                 email_queue_name=email_queue.name,
@@ -269,40 +232,43 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
             if not tracker:
                 frappe.logger().error(f"[Campaign] Failed to create tracker for Email Queue: {email_queue.name}")
             else:
-                frappe.logger().info(f"[Campaign] Tracker created BEFORE pixel injection: {tracker.name}")
+                frappe.logger().info(f"[Campaign] Tracker created: {tracker.name}")
 
-            # Now inject pixel
-            message_with_pixel = inject_tracking_pixel(rendered_message, email_queue.name)
-
-            mime_message = get_email(
-                subject=rendered_subject,
-                content=message_with_pixel,
-                recipients=[recipient_email],
-                sender=sender_email
-            )
-            email_queue.message = mime_message.as_string()
+            # ✅ STEP 4.3: Build MIME message with SendGrid custom args
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
+            import json
+            
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = rendered_subject
+            msg['From'] = sender_email
+            msg['To'] = recipient_email
+            
+            # Add custom args for SendGrid webhook
+            custom_args = {
+                "email_queue_name": email_queue.name,
+                "lead_name": lead_doc.name,
+                "tracker_name": tracker.name if tracker else None
+            }
+            
+            msg.add_header('X-SMTPAPI', json.dumps({
+                "unique_args": custom_args,
+                "category": ["crm_campaign_email"]
+            }))
+            
+            frappe.logger().info(f"[Campaign] Custom args: {json.dumps(custom_args)}")
+            
+            # Add HTML content
+            html_part = MIMEText(rendered_message, 'html')
+            msg.attach(html_part)
+            
+            # Update Email Queue with MIME message
+            email_queue.message = msg.as_string()
             email_queue.save(ignore_permissions=True)
             frappe.db.commit()
 
-            status = "scheduled"
-            msg = "Email queued successfully with tracking"
-
-            # Send immediately if requested
-            if send_now:
-                try:
-                    email_queue.reload()
-                    email_queue.send()
-                    status = "sent"
-                    msg = "Email sent immediately with tracking"
-                except Exception as send_error:
-                    status = "error"
-                    msg = f"Failed to send email: {str(send_error)}"
-                    frappe.log_error(
-                        title="Email Send Failed",
-                        message=f"Lead: {lead_doc.name}\nEmail: {recipient_email}\nError: {str(send_error)}"
-                    )
+            initial_delivery_status = "" if not send_now and send_after_datetime else "Sending"
             
-            # Communication log
             comm = frappe.get_doc({
                 "doctype": "Communication",
                 "communication_type": "Communication",
@@ -311,15 +277,39 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
                 "content": rendered_message,
                 "sender": sender_email,
                 "recipients": recipient_email,
-                "status": "Linked",
+                "status": "Linked",  
+                "delivery_status": initial_delivery_status,  
                 "sent_or_received": "Sent",
                 "reference_doctype": "CRM Lead",
                 "reference_name": lead_id,
                 "email_queue": email_queue.name,
-                "email_status": "Open" if status in ["scheduled", "sent"] else "Error"
+                "email_status": "Open"
             })
+            ensure_communication_has_thread_id(comm)
             comm.insert(ignore_permissions=True)
 
+            if not send_now and send_after_datetime:
+                frappe.db.set_value("Communication", comm.name, "delivery_status", "Queued", update_modified=False)
+                frappe.db.set_value("Communication", comm.name, "status", "Queued", update_modified=False)
+                frappe.db.commit()
+                frappe.logger().info(f"[Campaign] Force-set Communication {comm.name} -> Queued")
+            frappe.db.commit()
+
+            frappe.logger().info(f"[Campaign] Created Communication: {comm.name} with status: {comm.status}, delivery_status: {comm.delivery_status}")
+
+            # ✅ STEP 4.5: Link Communication to tracker
+            if tracker:
+                frappe.db.set_value(
+                    "Lead Email Tracker",
+                    tracker.name,
+                    "communication",
+                    comm.name,
+                    update_modified=False
+                )
+                frappe.db.commit()
+                frappe.logger().info(f"[Campaign] Linked tracker {tracker.name} to communication {comm.name}")
+
+            # ✅ STEP 4.6: Sync message_id if available
             if email_queue.message_id:
                 frappe.db.set_value(
                     "Communication",
@@ -328,60 +318,122 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
                     email_queue.message_id,
                     update_modified=False
                 )
-            
-            # ✅ Now update the tracker with the Communication link
-            if tracker:
-                tracker.db_set("communication", comm.name, update_modified=False)
-                frappe.logger().info(f"[Campaign] Updated tracker {tracker.name} with communication: {comm.name}")
-            
-            frappe.db.commit()
-            tracker.reload()
-            if tracker.communication:
+                frappe.db.commit()
+
+            status = "scheduled"
+            msg_text = "Email queued successfully with tracking"
+
+            # ✅ STEP 4.7: Send immediately if requested
+            if send_now:
                 try:
-                    comm = frappe.get_doc("Communication", tracker.communication)
-                    new_status = "Queued" 
-
-                    # Update DB fields
-                    comm.db_set("status", new_status, update_modified=False)
-                    comm.db_set("delivery_status", new_status, update_modified=False)
-                    frappe.logger().info(f"[Tracker Update] Communication {comm.name} -> {new_status}")
-
-                    # Notify real-time updates (list + docinfo)
-                    comm.notify_change("update")
-                    frappe.publish_realtime(
-                        "list_update",
-                        {
-                            "doctype": "Communication",
-                            "name": comm.name,
-                            "delivery_status": new_status,
-                        },
-                        after_commit=True,
-                    )
-
-                    if comm.reference_doctype and comm.reference_name:
-                        frappe.publish_realtime(
-                            "docinfo_update",
-                            {
-                                "doc": comm.as_dict(),
-                                "key": "communications",
-                                "action": "update",
-                            },
-                            doctype=comm.reference_doctype,
-                            docname=comm.reference_name,
-                            after_commit=True,
+                    email_queue.reload()
+                    email_queue.send()
+                    status = "sent"
+                    msg_text = "Email sent immediately with tracking"
+                    
+                    # ✅ Update tracker status to "Sent"
+                    if tracker:
+                        frappe.db.set_value(
+                            "Lead Email Tracker",
+                            tracker.name,
+                            "status",
+                            "Sent",
+                            update_modified=False
                         )
-
-                except Exception as comm_error:
-                    frappe.logger().error(
-                        f"[Tracker Update] Failed to update Communication for tracker {tracker.name}: {str(comm_error)}"
+                        frappe.db.set_value(
+                            "Lead Email Tracker",
+                            tracker.name,
+                            "last_sent_on",
+                            now_datetime(),
+                            update_modified=False
+                        )
+                    
+                    # ✅ Update Communication status to "Sent"
+                    frappe.db.set_value(
+                        "Communication",
+                        comm.name,
+                        "status",
+                        "Sent",
+                        update_modified=False
                     )
+                    frappe.db.set_value(
+                        "Communication",
+                        comm.name,
+                        "delivery_status",
+                        "Sent",
+                        update_modified=False
+                    )
+                    frappe.db.commit()
+                    
+                except Exception as send_error:
+                    status = "error"
+                    msg_text = f"Failed to send email: {str(send_error)}"
+                    
+                    # ✅ Update status to Error on failure
+                    if tracker:
+                        frappe.db.set_value(
+                            "Lead Email Tracker",
+                            tracker.name,
+                            "status",
+                            "Error",
+                            update_modified=False
+                        )
+                    
+                    frappe.db.set_value(
+                        "Communication",
+                        comm.name,
+                        "delivery_status",
+                        "Error",
+                        update_modified=False
+                    )
+                    frappe.db.commit()
+                    
+                    frappe.log_error(
+                        title="Email Send Failed",
+                        message=f"Lead: {lead_doc.name}\nEmail: {recipient_email}\nError: {str(send_error)}"
+                    )
+            
+            try:
+                print("[Campaign] Triggering UI updates for Communication:", comm.name)
+                comm_doc = frappe.get_doc("Communication", tracker.communication)
+                comm_doc.notify_change("update")
+                
+                # ✅ Get current delivery_status from DB
+                current_delivery_status = frappe.db.get_value("Communication", comm.name, "delivery_status")
+                
+                frappe.publish_realtime(
+                    "list_update",
+                    {
+                        "doctype": "Communication",
+                        "name": comm.name,
+                        "delivery_status": "Queued" if not send_now and send_after_datetime else current_delivery_status
+                    },
+                    after_commit=True
+                )
+                
+                if comm_doc.reference_doctype and comm_doc.reference_name:
+                    frappe.publish_realtime(
+                        "docinfo_update",
+                        {
+                            "doc": comm_doc.as_dict(),
+                            "key": "communications",
+                            "action": "update"
+                        },
+                        doctype=comm_doc.reference_doctype,
+                        docname=comm_doc.reference_name,
+                        after_commit=True
+                    )
+                    frappe.logger().info(f"[Campaign] Published timeline update for {comm_doc.reference_name}")
+            except Exception as ui_error:
+                frappe.logger().error(f"[Campaign] Failed to trigger UI updates: {str(ui_error)}")
+            
             frappe.db.commit()
             
             responses.append({
                 "lead": lead_id,
                 "email": recipient_email,
                 "status": status,
-                "message": msg,
+                "message": msg_text,
                 "communication_id": comm.name,
                 "email_queue_id": email_queue.name,
                 "tracker_id": tracker.name if tracker else None,
