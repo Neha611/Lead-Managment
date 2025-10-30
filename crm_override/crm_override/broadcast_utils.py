@@ -8,6 +8,10 @@ from frappe.email.doctype.email_account.email_account import EmailAccount
 from urllib.parse import quote
 from frappe.utils import validate_email_address
 from crm_override.crm_override.email_tracker import update_tracker_on_email_send, update_tracker_on_email_error
+from crm_override.crm_override.email_threading.outbound_email_threading import (
+    ensure_communication_has_thread_id,
+    add_thread_id_to_outbound_email
+)
 
 def create_lead_segment(segmentname, lead_names, description=None):
     """
@@ -215,6 +219,7 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
             frappe.db.commit()
 
             frappe.logger().info(f"[Campaign] Created Email Queue: {email_queue.name}")
+            add_thread_id_to_outbound_email(email_queue)
 
             # ✅ STEP 4.2: Create tracker IMMEDIATELY (BEFORE Communication)
             tracker = create_lead_email_tracker(
@@ -280,6 +285,7 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
                 "email_queue": email_queue.name,
                 "email_status": "Open"
             })
+            ensure_communication_has_thread_id(comm)
             comm.insert(ignore_permissions=True)
 
             if not send_now and send_after_datetime:
