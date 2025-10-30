@@ -168,9 +168,9 @@ doc_events = {
     }
 }
 
-override_doctype_class = {
-    "Communication": "crm_override.crm_override.doctype.communication.communication.Communication"
-}
+# override_doctype_class = {
+#     "Communication": "crm_override.crm_override.doctype.communication.communication.Communication"
+# }
 
 override_whitelisted_methods = {
     "frappe.email.queue.email_tracker": "crm_override.crm_override.email_tracker.email_tracker"
