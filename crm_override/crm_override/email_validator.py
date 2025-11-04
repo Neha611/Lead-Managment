@@ -19,7 +19,7 @@ def get_validation_settings():
 
 			result = {
 				"enabled": getattr(settings, "enable_validation", 1),
-				"api_key": getattr(settings, "api_key", None) or frappe.conf.get("gemini_api_key"),
+				"api_key": getattr(settings, "gemini_api_key", None) or frappe.conf.get("gemini_api_key"),
 				"model": getattr(settings, "gemini_model", "gemini-2.0-flash-exp") or "gemini-2.0-flash-exp",
 				"fail_safe": getattr(settings, "fail_safe_mode", 1),
 				"log_invalid": getattr(settings, "log_invalid_emails", 1),
