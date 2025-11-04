@@ -73,7 +73,6 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 		logger.info("⏳ Calling Gemini API...")
 		# Get validation settings
 		settings = get_validation_settings()
-		print("Calling GEMINI with these settings: ", settings)
 		# Get API key from settings
 		api_key = settings.get("api_key")
 
@@ -97,10 +96,10 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 		# Limit content to avoid token limits (keep it small for faster processing)
 		# ~500 characters = ~100-150 tokens, enough to determine spam vs legitimate
 		email_text = email_text[:2000]
-		print("Initalizing gemini client")
+
 		# Initialize Gemini client
 		client = genai.Client(api_key=api_key)
-		print("Initialized Gemini client")
+
 		# Use custom prompt if available, otherwise use default
 		if settings.get("custom_prompt"):
 			# Strip HTML tags from custom prompt (if user used Text Editor field)
@@ -147,18 +146,16 @@ Raw Email Content:
 				'max_output_tokens': 50,  # Allow for thinking tokens + actual response
 			}
 		)
-		print("Received response from Gemini", response)
 
 		# Handle response using structured access
-		print("Checking response candidates")
 		if not response or not response.candidates or len(response.candidates) == 0:
 			logger.error(f"❌ Gemini returned empty response. Response object: {response}")
 			raise ValueError("Gemini API returned empty response")
-		print("Checked")
+
 		# Access the exact text from structured response
 		result = response.candidates[0].content.parts[0].text.strip()
 		logger.info(f"🤖 Raw Gemini Response: {result}")
-		print(result)
+
 		# Exact match (case-insensitive)
 		if result.lower() == "invalid":
 			final_result = "Invalid"
