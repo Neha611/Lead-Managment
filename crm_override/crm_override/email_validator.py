@@ -17,9 +17,16 @@ def get_validation_settings():
 		if frappe.db.exists("DocType", "Custom Email Validator Settings"):
 			settings = frappe.get_doc("Custom Email Validator Settings", "Custom Email Validator Settings")
 
+			# Get decrypted API key using get_decrypted_password() for Password field
+			api_key = frappe.utils.password.get_decrypted_password(
+				"Custom Email Validator Settings",
+				"Custom Email Validator Settings",
+				"gemini_api_key"
+			) or frappe.conf.get("gemini_api_key")
+
 			result = {
 				"enabled": getattr(settings, "enable_validation", 1),
-				"api_key": getattr(settings, "api_key", None) or frappe.conf.get("gemini_api_key"),
+				"api_key": api_key,
 				"model": getattr(settings, "gemini_model", "gemini-2.0-flash-exp") or "gemini-2.0-flash-exp",
 				"fail_safe": getattr(settings, "fail_safe_mode", 1),
 				"log_invalid": getattr(settings, "log_invalid_emails", 1),
@@ -73,7 +80,6 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 		logger.info("⏳ Calling Gemini API...")
 		# Get validation settings
 		settings = get_validation_settings()
-		print("Calling GEMINI with these settings: ", settings)
 		# Get API key from settings
 		api_key = settings.get("api_key")
 
@@ -100,7 +106,7 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 
 		# Initialize Gemini client
 		client = genai.Client(api_key=api_key)
-		print("Initialized Gemini client")
+
 		# Use custom prompt if available, otherwise use default
 		if settings.get("custom_prompt"):
 			# Strip HTML tags from custom prompt (if user used Text Editor field)
@@ -147,18 +153,16 @@ Raw Email Content:
 				'max_output_tokens': 50,  # Allow for thinking tokens + actual response
 			}
 		)
-		# print("Received response from Gemini", response)
 
 		# Handle response using structured access
-		print("Checking response candidates")
 		if not response or not response.candidates or len(response.candidates) == 0:
 			logger.error(f"❌ Gemini returned empty response. Response object: {response}")
 			raise ValueError("Gemini API returned empty response")
-		print("Checked")
+
 		# Access the exact text from structured response
 		result = response.candidates[0].content.parts[0].text.strip()
 		logger.info(f"🤖 Raw Gemini Response: {result}")
-		print(result)
+
 		# Exact match (case-insensitive)
 		if result.lower() == "invalid":
 			final_result = "Invalid"

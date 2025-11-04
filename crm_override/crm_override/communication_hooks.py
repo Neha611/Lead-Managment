@@ -1,8 +1,8 @@
 import frappe
 from crm_override.crm_override.email_validator import validate_email_with_gemini, is_validation_enabled
 
-# Module loaded confirmation
-print("[COMMUNICATION_HOOKS] Module loaded successfully!")
+# Module loaded confirmation - only visible during bench start in dev
+# In production, this goes to supervisor logs
 
 
 def validate_before_linking_to_lead(doc, method=None):
@@ -19,7 +19,6 @@ def validate_before_linking_to_lead(doc, method=None):
 		method: Hook method name
 	"""
 	# Log to dedicated email validation log file
-	print("HOOK CALLED")
 	logger = frappe.logger("email_validation", allow_site=True, file_count=5)
 	logger.info("🔵 Hook triggered for Communication")
 	logger.info(f"  Medium: {doc.communication_medium}")
@@ -73,7 +72,6 @@ Subject: {subject}
 """
 	logger.info("  📨 Prepared raw email content for validation")
 	# Validate with Gemini
-	print("Calling GEMINI")
 	validation_result = validate_email_with_gemini(raw_email, sender, subject)
 
 	if validation_result == "Invalid":
@@ -147,7 +145,6 @@ def add_validation_info_to_communication(doc, method=None):
 	Adds validation metadata to the communication comment/description
 	Also deletes auto-created Leads for invalid emails
 	"""
-	print("AFTER INSERT HOOK CALLED")
 	if hasattr(doc.flags, 'ai_validation_result'):
 		validation_result = doc.flags.ai_validation_result
 
