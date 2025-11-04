@@ -97,7 +97,7 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 		# Limit content to avoid token limits (keep it small for faster processing)
 		# ~500 characters = ~100-150 tokens, enough to determine spam vs legitimate
 		email_text = email_text[:2000]
-
+		print("Initalizing gemini client")
 		# Initialize Gemini client
 		client = genai.Client(api_key=api_key)
 		print("Initialized Gemini client")
@@ -147,7 +147,7 @@ Raw Email Content:
 				'max_output_tokens': 50,  # Allow for thinking tokens + actual response
 			}
 		)
-		# print("Received response from Gemini", response)
+		print("Received response from Gemini", response)
 
 		# Handle response using structured access
 		print("Checking response candidates")
