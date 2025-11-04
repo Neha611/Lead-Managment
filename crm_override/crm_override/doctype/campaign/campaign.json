@@ -12,8 +12,10 @@
   "campaign",
   "campaign_name",
   "naming_series",
+  "campaign_type",
   "campaign_schedules_section",
   "campaign_schedules",
+  "campaign_schedules_call",
   "description_section",
   "description"
  ],
@@ -62,15 +64,29 @@
    "oldfieldname": "description",
    "oldfieldtype": "Text",
    "width": "300px"
+  },
+  {
+   "fieldname": "campaign_type",
+   "fieldtype": "Select",
+   "label": "Campaign Type",
+   "options": "Email\nCall",
+   "reqd": 1
+  },
+  {
+   "fieldname": "campaign_schedules_call",
+   "fieldtype": "Table",
+   "label": "Campaign Schedules Call",
+   "options": "Campaign Call Schedule"
   }
  ],
  "icon": "fa fa-bullhorn",
  "idx": 1,
  "links": [],
- "modified": "2024-03-27 13:06:43.861206",
+ "modified": "2025-10-31 15:29:48.406193",
  "modified_by": "Administrator",
  "module": "CRM Override",
  "name": "Campaign",
+ "naming_rule": "By \"Naming Series\" field",
  "owner": "Administrator",
  "permissions": [
   {
@@ -105,6 +121,7 @@
   }
  ],
  "quick_entry": 1,
+ "row_format": "Dynamic",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": []
