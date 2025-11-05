@@ -157,6 +157,12 @@ scheduler_events = {
         ]
     }
 }
+# tracker and email validation
+print("\n" + "="*80)
+print("[HOOKS.PY] Registering Communication hooks...")
+print("  - before_insert: validate_before_linking_to_lead")
+print("  - after_insert: add_validation_info_to_communication")
+print("="*80 + "\n")
 
 # tracker and email validation
 print("\n" + "="*80)
@@ -177,12 +183,13 @@ doc_events = {
     }
 }
 
-# override_doctype_class = {
-#     "Communication": "crm_override.crm_override.doctype.communication.communication.Communication"
-# }
+override_doctype_class = {
+    "CRM Call Log": "crm_override.crm_override.doctype.crm_call_log.crm_call_log.CRMCallLog"
+}
 
 override_whitelisted_methods = {
-    "frappe.email.queue.email_tracker": "crm_override.crm_override.email_tracker.email_tracker"
+    "frappe.email.queue.email_tracker": "crm_override.crm_override.email_tracker.email_tracker",
+    "crm.fcrm.doctype.crm_call_log.crm_call_log" : "crm_override.crm_override.doctype.crm_call_log.crm_call_log"
 }
 
 

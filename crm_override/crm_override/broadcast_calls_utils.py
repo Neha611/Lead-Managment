@@ -13,28 +13,49 @@ RINGG_API_CAMPAIGN_URL = "https://prod-api.ringg.ai/ca/api/v0/campaign/start"
 # 📧 HELPER: Fetch API credentials
 # -------------------------------------------------------------------------
 
-def get_ringg_settings():
-    """Fetch Ringg AI Settings (api_key, default_caller_id, default_agent_id)."""
-    agent_name="AI Call"
+def get_ringg_settings(campaign_name):
+    """Fetch Ringg AI Settings using Campaign name to find Call Campaign."""
+    
+    # Find the Call Campaign that references this Campaign
+    call_campaigns = frappe.get_all(
+        "Call Campaign",
+        filters={"campaign": campaign_name},
+        fields=["name", "caller"],
+        order_by="creation desc",
+        limit=1
+    )
+    
+    if not call_campaigns:
+        frappe.throw(f"No Call Campaign found for Campaign: {campaign_name}")
+    
+    call_campaign = call_campaigns[0]
+    ringg_settings_id = call_campaign.get("caller")
+    
+    if not ringg_settings_id:
+        frappe.throw(f"No caller selected in Call Campaign: {call_campaign.name}")
+    
+    # Fetch settings using the caller ID
     settings = frappe.db.get_value(
         "Ringg AI Settings",
-        {"agent_name": agent_name},
+        ringg_settings_id,
         ["name", "api_key", "agent_id", "caller_id"],
         as_dict=True,
     )
+    
+    if not settings:
+        frappe.throw(f"Ringg AI Settings not found for ID: {ringg_settings_id}")
+    
     caller_id_value = None
     if settings.get("caller_id"):
-        # Fetch the actual caller_id value from the linked Caller UUID doctype
-        caller_doc = frappe.db.get_value(
+        caller_id_value = frappe.db.get_value(
             "Caller UUID",
             settings.get("caller_id"),
-            "caller_uuid",
-            as_dict=False
+            "caller_uuid"
         )
-        caller_id_value = caller_doc
+    
     return {
         "api_key": settings.get("api_key"),
-        "agent_id": settings.get("agent_id"),   
+        "agent_id": settings.get("agent_id"),
         "caller_id": caller_id_value,
     }
 
@@ -204,7 +225,7 @@ def trigger_bulk_call_job(call_campaign_name, leads, campaign_name, schedule_nam
         start_time = format_for_ringg(call_campaign.start_date)
         end_time = format_for_ringg(call_campaign.end_date) if call_campaign.end_date else None
         # Fetch API settings
-        ringg_settings = get_ringg_settings()
+        ringg_settings = get_ringg_settings(campaign_name)
         api_key = ringg_settings["api_key"]
         agent_id = ringg_settings["agent_id"]
         caller_id = ringg_settings["caller_id"]
