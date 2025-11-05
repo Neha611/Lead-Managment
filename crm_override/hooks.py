@@ -164,6 +164,13 @@ print("  - before_insert: validate_before_linking_to_lead")
 print("  - after_insert: add_validation_info_to_communication")
 print("="*80 + "\n")
 
+# tracker and email validation
+print("\n" + "="*80)
+print("[HOOKS.PY] Registering Communication hooks...")
+print("  - before_insert: validate_before_linking_to_lead")
+print("  - after_insert: add_validation_info_to_communication")
+print("="*80 + "\n")
+
 doc_events = {
     "Email Queue": {
         "after_insert": "crm_override.crm_override.email_queue_hooks.on_email_queue_after_insert",
@@ -173,7 +180,7 @@ doc_events = {
     "Communication": {
         "before_insert": "crm_override.crm_override.communication_hooks.validate_before_linking_to_lead",
         "after_insert": "crm_override.crm_override.communication_hooks.add_validation_info_to_communication",
-    },
+    }
 }
 
 override_doctype_class = {
