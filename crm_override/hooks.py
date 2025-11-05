@@ -157,22 +157,32 @@ scheduler_events = {
         ]
     }
 }
+# tracker and email validation
+print("\n" + "="*80)
+print("[HOOKS.PY] Registering Communication hooks...")
+print("  - before_insert: validate_before_linking_to_lead")
+print("  - after_insert: add_validation_info_to_communication")
+print("="*80 + "\n")
 
-# tracker
 doc_events = {
     "Email Queue": {
         "after_insert": "crm_override.crm_override.email_queue_hooks.on_email_queue_after_insert",
         "before_save": "crm_override.crm_override.email_queue_hooks.on_email_queue_before_save",
         "on_submit": "crm_override.crm_override.email_queue_hooks.on_email_queue_on_submit",
     },
+    "Communication": {
+        "before_insert": "crm_override.crm_override.communication_hooks.validate_before_linking_to_lead",
+        "after_insert": "crm_override.crm_override.communication_hooks.add_validation_info_to_communication",
+    },
 }
 
-# override_doctype_class = {
-#     "Communication": "crm_override.crm_override.doctype.communication.communication.Communication"
-# }
+override_doctype_class = {
+    "CRM Call Log": "crm_override.crm_override.doctype.crm_call_log.crm_call_log.CRMCallLog"
+}
 
 override_whitelisted_methods = {
-    "frappe.email.queue.email_tracker": "crm_override.crm_override.email_tracker.email_tracker"
+    "frappe.email.queue.email_tracker": "crm_override.crm_override.email_tracker.email_tracker",
+    "crm.fcrm.doctype.crm_call_log.crm_call_log" : "crm_override.crm_override.doctype.crm_call_log.crm_call_log"
 }
 
 
