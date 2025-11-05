@@ -244,21 +244,8 @@ def trigger_bulk_call_job(call_campaign_name, leads, campaign_name, schedule_nam
                 lead_display_name,
                 lead.get("mobile_no")   
             ])
-        with open("/home/neha/ringg-key", "w", encoding="utf-8", newline="") as f:
-            f.write(api_key)
-            f.write("\n")
-            f.write(agent_id)
-            f.write("\n")
-            f.write(campaign_name)
-            f.write("\n")
-            f.write(start_time)
-            f.write("\n")
-            f.write(end_time or "")
         csv_data = output.getvalue()
-        with open("/home/neha/ringg.csv", "w", encoding="utf-8", newline="") as f:
-            f.write(csv_data)
 
-        print(campaign_name, start_time, end_time)
         payload = {
             "variables_map": JSON.dumps({
                 "callee_name": "name",
@@ -313,8 +300,6 @@ def trigger_bulk_call_job(call_campaign_name, leads, campaign_name, schedule_nam
             "list_id": uploads_response.json().get("list_id"),
             "from_numbers":[caller_id]
         }
-        with open("/home/neha/listId", "w", encoding="utf-8", newline="") as f:
-            f.write(call_payload["list_id"])
         response = requests.post(
             RINGG_API_CAMPAIGN_URL,  
             json=call_payload, 
