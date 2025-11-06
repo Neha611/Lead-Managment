@@ -1,0 +1,62 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-11-05 13:59:06.072387",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "lead_quality",
+  "intent_score",
+  "next_action",
+  "purchase_probability",
+  "customer_segment",
+  "satisfaction_score"
+ ],
+ "fields": [
+  {
+   "fieldname": "lead_quality",
+   "fieldtype": "Data",
+   "label": "Lead Quality"
+  },
+  {
+   "fieldname": "intent_score",
+   "fieldtype": "Data",
+   "label": "Intent Score"
+  },
+  {
+   "fieldname": "next_action",
+   "fieldtype": "Data",
+   "label": "Next Action"
+  },
+  {
+   "fieldname": "purchase_probability",
+   "fieldtype": "Data",
+   "label": "Purchase Probability"
+  },
+  {
+   "fieldname": "customer_segment",
+   "fieldtype": "Data",
+   "label": "Customer Segment"
+  },
+  {
+   "fieldname": "satisfaction_score",
+   "fieldtype": "Data",
+   "label": "Satisfaction Score"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-11-05 14:01:44.322234",
+ "modified_by": "Administrator",
+ "module": "CRM Override",
+ "name": "Call Analysis Data",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
