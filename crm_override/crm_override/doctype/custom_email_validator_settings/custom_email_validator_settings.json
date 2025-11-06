@@ -1,0 +1,97 @@
+{
+ "actions": [],
+ "creation": "2025-10-31 16:14:03.185200",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enable_validation",
+  "section_break_1",
+  "column_break_ondk",
+  "gemini_api_key",
+  "gemini_model",
+  "column_break_1",
+  "fail_safe_mode",
+  "log_invalid_emails",
+  "section_break_2",
+  "validation_prompt"
+ ],
+ "fields": [
+  {
+   "default": "1",
+   "fieldname": "enable_validation",
+   "fieldtype": "Check",
+   "label": "Enable Email Validation"
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_ondk",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "gemini_api_key",
+   "fieldtype": "Password",
+   "label": "Gemini API Key"
+  },
+  {
+   "default": "gemini-2.5-flash",
+   "fieldname": "gemini_model",
+   "fieldtype": "Data",
+   "label": "Gemini Model"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "fail_safe_mode",
+   "fieldtype": "Check",
+   "label": "Fail Safe Mode",
+   "description": "If enabled, defaults to 'Valid' when validation fails. If disabled, defaults to 'Invalid'."
+  },
+  {
+   "default": "1",
+   "fieldname": "log_invalid_emails",
+   "fieldtype": "Check",
+   "label": "Log Invalid Emails"
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break"
+  },
+  {
+   "default": "You are an email classification system. Analyze the following raw email and determine if it was sent by a real person or if it is a promotional, automated, or notification-type email.\n\nDefinition:\n- \"Valid\" → Emails written or sent personally by a real human being (e.g., personal communication, client inquiry, recruiter message, colleague, friend, etc.)\n- \"Invalid\" → All other emails, including:\n  - Marketing, promotions, newsletters\n  - Automated notifications (e.g., receipts, password resets, order confirmations)\n  - System alerts or product updates\n  - Bulk or templated messages\n  - Social media notifications\n  - Phishing, spam, or scams\n\nUse the email headers, sender details, and body content to make this judgment.\n\nRespond with ONLY ONE WORD: either \"Valid\" or \"Invalid\".",
+   "fieldname": "validation_prompt",
+   "fieldtype": "Text Editor",
+   "label": "Custom Validation Prompt"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2025-11-03 20:45:00.000000",
+ "modified_by": "Administrator",
+ "module": "CRM Override",
+ "name": "Custom Email Validator Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

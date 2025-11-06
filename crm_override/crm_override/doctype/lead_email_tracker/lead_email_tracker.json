@@ -50,7 +50,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "Queued\nSent\nOpened\nFailed\nBounced"
+   "options": "Queued\nSent\nOpened\nFailed\nBounced\nReplied"
   },
   {
    "fieldname": "last_sent_on",
@@ -83,7 +83,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-10-15 12:45:44.810261",
+ "modified": "2025-10-30 17:23:05.946363",
  "modified_by": "Administrator",
  "module": "CRM Override",
  "name": "Lead Email Tracker",

@@ -1,0 +1,38 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-10-31 15:00:50.120311",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "send_after_days",
+  "send_after_minutes"
+ ],
+ "fields": [
+  {
+   "fieldname": "send_after_days",
+   "fieldtype": "Int",
+   "label": "Send After (Days)"
+  },
+  {
+   "fieldname": "send_after_minutes",
+   "fieldtype": "Int",
+   "label": "Send After (Minutes)"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-10-31 15:29:10.952685",
+ "modified_by": "Administrator",
+ "module": "CRM Override",
+ "name": "Campaign Call Schedule",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
