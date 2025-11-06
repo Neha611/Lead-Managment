@@ -100,9 +100,6 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 		else:
 			email_text = str(raw_email_content)
 
-		# Limit content to avoid token limits (keep it small for faster processing)
-		# ~500 characters = ~100-150 tokens, enough to determine spam vs legitimate
-		email_text = email_text[:2000]
 
 		# Initialize Gemini client
 		client = genai.Client(api_key=api_key)
@@ -150,10 +147,10 @@ Raw Email Content:
 			contents=prompt,
 			config={
 				'temperature': 0,  # Deterministic output
-				'max_output_tokens': 50,  # Allow for thinking tokens + actual response
+				'max_output_tokens': 1500,  # High limit for thinking models with long emails
 			}
 		)
-
+		logger.error(f"✅ Received response from Gemini: {response}")
 		# Handle response using structured access
 		if not response or not response.candidates or len(response.candidates) == 0:
 			logger.error(f"❌ Gemini returned empty response. Response object: {response}")
@@ -190,6 +187,7 @@ Raw Email Content:
 		logger.error(f"Subject: {subject}")
 		logger.error(f"Error: {str(e)}")
 		logger.error(f"Traceback: {frappe.get_traceback()}")
+		# logger.error(f"For settings: {settings}")
 		logger.error("="*80)
 
 		# Also log to Error Log for UI visibility
