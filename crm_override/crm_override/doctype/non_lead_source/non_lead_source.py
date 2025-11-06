@@ -5,5 +5,5 @@
 from frappe.model.document import Document
 
 
-class RejectedCRMLeadSource(Document):
+class NonLeadSource(Document):
 	pass

@@ -99,7 +99,7 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Rejected CRM Lead Status",
+   "options": "Non Lead Status",
    "reqd": 1,
    "search_index": 1
   },
@@ -156,7 +156,7 @@
    "fieldname": "source",
    "fieldtype": "Link",
    "label": "Source",
-   "options": "Rejected CRM Lead Source"
+   "options": "Non Lead Source"
   },
   {
    "fieldname": "industry",
@@ -334,7 +334,7 @@
  "modified": "2025-05-14 19:51:06.184569",
  "modified_by": "Administrator",
  "module": "CRM Override",
- "name": "Rejected CRM Lead",
+ "name": "Non Lead",
  "naming_rule": "By \"Naming Series\" field",
  "owner": "Administrator",
  "permissions": [

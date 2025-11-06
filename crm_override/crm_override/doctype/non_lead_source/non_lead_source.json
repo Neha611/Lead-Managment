@@ -33,7 +33,7 @@
  "modified": "2025-06-30 16:53:51.721752",
  "modified_by": "Administrator",
  "module": "CRM Override",
- "name": "Rejected CRM Lead Source",
+ "name": "Non Lead Source",
  "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [

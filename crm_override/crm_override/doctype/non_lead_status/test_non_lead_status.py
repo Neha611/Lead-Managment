@@ -5,5 +5,5 @@
 from frappe.tests import UnitTestCase
 
 
-class TestRejectedCRMLeadStatus(UnitTestCase):
+class TestNonLeadStatus(UnitTestCase):
 	pass

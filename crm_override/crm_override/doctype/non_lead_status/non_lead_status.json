@@ -40,7 +40,7 @@
  "modified": "2025-01-02 22:13:43.038656",
  "modified_by": "Administrator",
  "module": "CRM Override",
- "name": "Rejected CRM Lead Status",
+ "name": "Non Lead Status",
  "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [

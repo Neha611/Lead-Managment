@@ -5,9 +5,9 @@ import frappe
 from frappe.model.document import Document
 
 
-class RejectedCRMLead(Document):
+class NonLead(Document):
 	"""
-	Rejected CRM Lead - for spam/promotional emails.
+	Non Lead - for spam/promotional emails.
 	Simplified version without CRM workflows.
 	"""
 	@staticmethod
@@ -81,20 +81,20 @@ class RejectedCRMLead(Document):
 
 @frappe.whitelist()
 def convert_to_lead(rejected_lead_id):
-	"""Convert a Rejected CRM Lead to CRM Lead"""
+	"""Convert a Non Lead to CRM Lead"""
 	from frappe import _
 
 	# Check permissions
-	if not frappe.has_permission("Rejected CRM Lead", "write", rejected_lead_id):
+	if not frappe.has_permission("Non Lead", "write", rejected_lead_id):
 		frappe.throw(_("Not allowed to convert Rejected Lead to Lead"), frappe.PermissionError)
 
 	# Get the rejected lead
-	rejected_lead = frappe.get_doc("Rejected CRM Lead", rejected_lead_id)
+	rejected_lead = frappe.get_doc("Non Lead", rejected_lead_id)
 
 	# Create new CRM Lead
 	lead = frappe.new_doc("CRM Lead")
 
-	# Map fields from Rejected CRM Lead to CRM Lead
+	# Map fields from Non Lead to CRM Lead
 	fields_to_copy = [
 		"salutation",
 		"first_name",
@@ -130,7 +130,7 @@ def convert_to_lead(rejected_lead_id):
 	communications = frappe.get_all(
 		"Communication",
 		filters={
-			"reference_doctype": "Rejected CRM Lead",
+			"reference_doctype": "Non Lead",
 			"reference_name": rejected_lead_id
 		},
 		fields=["name"]
@@ -150,7 +150,7 @@ def convert_to_lead(rejected_lead_id):
 	comments = frappe.get_all(
 		"Comment",
 		filters={
-			"reference_doctype": "Rejected CRM Lead",
+			"reference_doctype": "Non Lead",
 			"reference_name": rejected_lead_id
 		},
 		fields=["name"]
@@ -170,7 +170,7 @@ def convert_to_lead(rejected_lead_id):
 	attachments = frappe.get_all(
 		"File",
 		filters={
-			"attached_to_doctype": "Rejected CRM Lead",
+			"attached_to_doctype": "Non Lead",
 			"attached_to_name": rejected_lead_id
 		},
 		fields=["name"]
@@ -187,7 +187,7 @@ def convert_to_lead(rejected_lead_id):
 		)
 
 	# Delete the rejected lead
-	frappe.delete_doc("Rejected CRM Lead", rejected_lead_id, ignore_permissions=True)
+	frappe.delete_doc("Non Lead", rejected_lead_id, ignore_permissions=True)
 
 	frappe.db.commit()
 

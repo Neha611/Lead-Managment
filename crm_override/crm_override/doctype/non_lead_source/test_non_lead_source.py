@@ -5,5 +5,5 @@
 from frappe.tests import UnitTestCase
 
 
-class TestRejectedCRMLeadSource(UnitTestCase):
+class TestNonLeadSource(UnitTestCase):
 	pass
