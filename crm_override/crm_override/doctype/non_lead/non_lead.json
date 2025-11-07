@@ -14,6 +14,7 @@
   "organization",
   "website",
   "territory",
+  "custom_tags",
   "industry",
   "job_title",
   "source",
@@ -279,6 +280,12 @@
    "fieldtype": "Link",
    "label": "Territory",
    "options": "CRM Territory"
+  },
+  {
+   "fieldname": "custom_tags",
+   "fieldtype": "Data",
+   "label": "Tags",
+   "description": "AI-generated tags from email validation"
   },
   {
    "fieldname": "log_tab",

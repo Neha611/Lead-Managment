@@ -5,7 +5,7 @@ from crm_override.crm_override.email_validator import validate_email_with_gemini
 # In production, this goes to supervisor logs
 
 
-def find_or_create_lead(email, full_name, subject, doctype="CRM Lead"):
+def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None):
 	"""
 	Find existing lead by email or create new one with row-level locking to prevent duplicates.
 	Uses SELECT FOR UPDATE with retry logic for race conditions.
@@ -15,6 +15,7 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead"):
 		full_name: Sender full name
 		subject: Email subject
 		doctype: "CRM Lead" or "Non Lead"
+		tags: List of tags from AI validation (optional)
 
 	Returns:
 		Lead document (existing or newly created)
@@ -36,7 +37,22 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead"):
 			if existing_lead:
 				existing_lead_name = existing_lead[0][0]
 				logger.info(f"🔗 Found existing {doctype}: {existing_lead_name} for {email}")
-				return frappe.get_doc(doctype, existing_lead_name)
+				lead = frappe.get_doc(doctype, existing_lead_name)
+
+				# Append new tags to existing tags
+				if tags:
+					existing_tags = lead.get("custom_tags") or ""
+					# Parse existing tags (comma-separated)
+					existing_tags_list = [t.strip() for t in existing_tags.split(",") if t.strip()] if existing_tags else []
+					# Merge with new tags, avoiding duplicates
+					merged_tags = list(set(existing_tags_list + tags))
+					# Update the custom_tags field
+					lead.custom_tags = ", ".join(merged_tags)
+					lead.flags.ignore_mandatory = True
+					lead.save(ignore_permissions=True)
+					logger.info(f"📝 Updated tags for {doctype}: {lead.name} - Tags: {lead.custom_tags}")
+
+				return lead
 
 			# No existing lead found, create new one
 			logger.info(f"➕ Creating new {doctype} for {email} (attempt {attempt + 1}/{max_retries})")
@@ -46,12 +62,13 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead"):
 				"email": email,
 				"first_name": full_name or email.split("@")[0],
 				"lead_name": full_name or email,
+				"custom_tags": ", ".join(tags) if tags else ""
 			})
 
 			lead.flags.ignore_mandatory = True
 			lead.insert(ignore_permissions=True)
 
-			logger.info(f"✅ Created {doctype}: {lead.name}")
+			logger.info(f"✅ Created {doctype}: {lead.name} with tags: {lead.custom_tags}")
 			return lead
 
 		except frappe.DuplicateEntryError:
@@ -62,7 +79,19 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead"):
 			existing_lead_name = frappe.db.get_value(doctype, {"email": email}, "name")
 			if existing_lead_name:
 				logger.info(f"🔄 Retrieved existing lead after duplicate: {existing_lead_name}")
-				return frappe.get_doc(doctype, existing_lead_name)
+				lead = frappe.get_doc(doctype, existing_lead_name)
+
+				# Append tags if provided
+				if tags:
+					existing_tags = lead.get("custom_tags") or ""
+					existing_tags_list = [t.strip() for t in existing_tags.split(",") if t.strip()] if existing_tags else []
+					merged_tags = list(set(existing_tags_list + tags))
+					lead.custom_tags = ", ".join(merged_tags)
+					lead.flags.ignore_mandatory = True
+					lead.save(ignore_permissions=True)
+					logger.info(f"📝 Updated tags for {doctype}: {lead.name} - Tags: {lead.custom_tags}")
+
+				return lead
 
 			if attempt < max_retries - 1:
 				continue
@@ -76,7 +105,19 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead"):
 			existing_lead_name = frappe.db.get_value(doctype, {"email": email}, "name")
 			if existing_lead_name:
 				logger.info(f"🔄 Retrieved lead after error: {existing_lead_name}")
-				return frappe.get_doc(doctype, existing_lead_name)
+				lead = frappe.get_doc(doctype, existing_lead_name)
+
+				# Append tags if provided
+				if tags:
+					existing_tags = lead.get("custom_tags") or ""
+					existing_tags_list = [t.strip() for t in existing_tags.split(",") if t.strip()] if existing_tags else []
+					merged_tags = list(set(existing_tags_list + tags))
+					lead.custom_tags = ", ".join(merged_tags)
+					lead.flags.ignore_mandatory = True
+					lead.save(ignore_permissions=True)
+					logger.info(f"📝 Updated tags for {doctype}: {lead.name} - Tags: {lead.custom_tags}")
+
+				return lead
 
 			if attempt < max_retries - 1:
 				continue
@@ -166,7 +207,7 @@ Subject: {subject}
 	# Find or create Lead based on validity field
 	if validity == "Valid":
 		# Valid email - create/find CRM Lead
-		lead = find_or_create_lead(sender, sender_full_name, subject, "CRM Lead")
+		lead = find_or_create_lead(sender, sender_full_name, subject, "CRM Lead", tags=tags)
 
 		# Set reference fields
 		doc.reference_doctype = "CRM Lead"
@@ -179,7 +220,7 @@ Subject: {subject}
 
 	else:
 		# Invalid email - create/find Non Lead
-		lead = find_or_create_lead(sender, sender_full_name, subject, "Non Lead")
+		lead = find_or_create_lead(sender, sender_full_name, subject, "Non Lead", tags=tags)
 
 		# Set reference fields
 		doc.reference_doctype = "Non Lead"

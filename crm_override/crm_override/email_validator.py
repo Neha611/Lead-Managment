@@ -10,12 +10,24 @@ def get_validation_settings():
 	Returns:
 		dict: Settings dictionary
 	"""
+	logger = frappe.logger("email_validation", allow_site=True, file_count=5)
+
 	try:
+		logger.info("="*80)
+		logger.info("🔍 FETCHING VALIDATION SETTINGS")
+		logger.info("="*80)
+
 		# Clear cache to get fresh settings
 		frappe.clear_cache(doctype="Custom Email Validator Settings")
+		logger.info("✅ Cache cleared for Custom Email Validator Settings")
 
-		if frappe.db.exists("DocType", "Custom Email Validator Settings"):
+		doctype_exists = frappe.db.exists("DocType", "Custom Email Validator Settings")
+		logger.info(f"📋 DocType exists: {doctype_exists}")
+
+		if doctype_exists:
+			logger.info("🔄 Fetching settings document...")
 			settings = frappe.get_doc("Custom Email Validator Settings", "Custom Email Validator Settings")
+			logger.info(f"✅ Settings document loaded: {settings.name}")
 
 			# Get decrypted API key using get_decrypted_password() for Password field
 			api_key = frappe.utils.password.get_decrypted_password(
@@ -23,6 +35,37 @@ def get_validation_settings():
 				"Custom Email Validator Settings",
 				"gemini_api_key"
 			) or frappe.conf.get("gemini_api_key")
+			logger.info(f"🔑 API key retrieved: {'Present' if api_key else 'Missing'}")
+
+			# Get validation_prompt field with detailed logging
+			validation_prompt_value = getattr(settings, "validation_prompt", None)
+			logger.info(f"📝 validation_prompt field:")
+			logger.info(f"   - Type: {type(validation_prompt_value)}")
+			logger.info(f"   - Is None: {validation_prompt_value is None}")
+			logger.info(f"   - Length: {len(validation_prompt_value) if validation_prompt_value else 0}")
+			logger.info(f"   - First 300 chars: {validation_prompt_value[:300] if validation_prompt_value else 'EMPTY/NONE'}")
+
+			# Try alternative field access methods
+			try:
+				dict_value = settings.as_dict().get("validation_prompt")
+				logger.info(f"📝 validation_prompt (via as_dict): {dict_value[:300] if dict_value else 'EMPTY/NONE'}")
+			except Exception as e:
+				logger.error(f"❌ Error getting validation_prompt via as_dict: {str(e)}")
+
+			# Try direct database query
+			try:
+				db_value = frappe.db.get_single_value("Custom Email Validator Settings", "validation_prompt")
+				logger.info(f"📝 validation_prompt (direct DB query):")
+				logger.info(f"   - Type: {type(db_value)}")
+				logger.info(f"   - Length: {len(db_value) if db_value else 0}")
+				logger.info(f"   - First 300 chars: {db_value[:300] if db_value else 'EMPTY/NONE'}")
+
+				# Use DB value if getattr failed
+				if not validation_prompt_value and db_value:
+					logger.warning("⚠️ getattr returned None but DB has value! Using DB value.")
+					validation_prompt_value = db_value
+			except Exception as e:
+				logger.error(f"❌ Error getting validation_prompt from DB: {str(e)}")
 
 			result = {
 				"enabled": getattr(settings, "enable_validation", 1),
@@ -30,12 +73,16 @@ def get_validation_settings():
 				"model": getattr(settings, "gemini_model", "gemini-2.0-flash-exp") or "gemini-2.0-flash-exp",
 				"fail_safe": getattr(settings, "fail_safe_mode", 1),
 				"log_invalid": getattr(settings, "log_invalid_emails", 1),
-				"custom_prompt": getattr(settings, "validation_prompt", None)
+				"custom_prompt": validation_prompt_value
 			}
 
+			logger.info(f"✅ Final result - custom_prompt: {result['custom_prompt'][:200] if result.get('custom_prompt') else 'NONE/EMPTY'}")
+			logger.info("="*80)
 			return result
 		else:
 			# Fallback to site_config
+			logger.warning("⚠️ DocType doesn't exist, falling back to site_config")
+			logger.info("="*80)
 			return {
 				"enabled": frappe.conf.get("enable_email_validation", True),
 				"api_key": frappe.conf.get("gemini_api_key"),
@@ -45,7 +92,10 @@ def get_validation_settings():
 				"custom_prompt": None
 			}
 	except Exception as e:
-		frappe.logger().error(f"[Email Validation] Error getting settings: {str(e)}")
+		logger.error("="*80)
+		logger.error(f"❌ ERROR IN get_validation_settings: {str(e)}")
+		logger.error(f"Traceback: {frappe.get_traceback()}")
+		logger.error("="*80)
 		# Return safe defaults
 		return {
 			"enabled": True,
@@ -109,17 +159,26 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 		client = genai.Client(api_key=api_key)
 
 		# Use custom prompt if available, otherwise use default
-		if settings.get("custom_prompt"):
+		custom_prompt_raw = settings.get("custom_prompt")
+		logger.info(f"🔍 Custom prompt retrieved from settings: {custom_prompt_raw[:200] if custom_prompt_raw else 'None'}...")
+
+		if custom_prompt_raw and custom_prompt_raw.strip():
 			# Strip HTML tags from custom prompt (if user used Text Editor field)
 			import re
-			prompt_template = settings.get("custom_prompt")
-			prompt_template = re.sub(r'<[^>]+>', '', prompt_template)  # Remove HTML tags
+			prompt_template = re.sub(r'<[^>]+>', '', custom_prompt_raw)  # Remove HTML tags
 			prompt_template = prompt_template.strip()
 
-			logger.info(f"Using custom prompt: {prompt_template[:100]}...")
-			prompt = f"{prompt_template}\n\nRaw Email Content:\n{email_text}"
-		else:
+			if prompt_template:
+				logger.info(f"✅ Using CUSTOM prompt (length: {len(prompt_template)} chars)")
+				logger.info(f"   First 200 chars: {prompt_template[:200]}...")
+				prompt = f"{prompt_template}\n\nRaw Email Content:\n{email_text}"
+			else:
+				logger.warning("⚠️ Custom prompt became empty after HTML stripping, using DEFAULT prompt")
+				custom_prompt_raw = None  # Force fallback to default
+
+		if not custom_prompt_raw or not custom_prompt_raw.strip():
 			# Default validation prompt
+			logger.info(f"📄 Using DEFAULT hardcoded prompt")
 			prompt = f"""You are an email validation system. Analyze the following raw email and determine if it's legitimate or spam/invalid.
 
 Consider the following criteria for INVALID emails:
