@@ -59,7 +59,7 @@ def get_validation_settings():
 
 def validate_email_with_gemini(raw_email_content, sender_email=None, subject=None):
 	"""
-	Send raw email to Gemini for validation.
+	Send raw email to Gemini for validation with structured output.
 
 	Args:
 		raw_email_content: Raw email message (bytes or str)
@@ -67,7 +67,11 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 		subject: Email subject (optional, for logging)
 
 	Returns:
-		str: "Valid" or "Invalid"
+		dict: {
+			"validity": "Valid" or "Invalid",
+			"tags": ["tag1", "tag2", ...],
+			"reason": "Explanation text"
+		}
 	"""
 	# Initialize logger outside try block so it's available in exception handler
 	logger = frappe.logger("email_validation", allow_site=True, file_count=5)
@@ -89,7 +93,7 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 				message="Please set 'gemini_api_key' in Custom Email Validator Settings or site_config.json"
 			)
 			# Fail-safe: allow email if no API key configured
-			return "Valid"
+			return {"validity": "Valid", "tags": ["No API Key"], "reason": "API key not configured, defaulting to Valid"}
 
 		# Convert bytes to string if needed
 		if isinstance(raw_email_content, bytes):
@@ -132,7 +136,10 @@ Consider the following criteria for VALID emails:
 - Professional correspondence
 - Automated system notifications from legitimate services
 
-Respond with ONLY ONE WORD: either "Valid" or "Invalid"
+You must respond with a structured JSON object containing:
+- "validity": Either "Valid" or "Invalid"
+- "tags": Array of relevant tags describing the email (e.g., country, product type, business category)
+- "reason": Brief explanation of your decision
 
 Raw Email Content:
 {email_text}
@@ -141,40 +148,83 @@ Raw Email Content:
 		# Get model name from settings
 		model_name = settings.get("model", "gemini-2.0-flash-exp")
 
-		# Call Gemini API with optimized settings
+		# Define schema for structured output
+		schema = {
+			"type": "object",
+			"properties": {
+				"validity": {
+					"type": "string",
+					"enum": ["Valid", "Invalid"],
+					"description": "Whether the email is valid or invalid"
+				},
+				"tags": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Relevant tags describing the email content"
+				},
+				"reason": {
+					"type": "string",
+					"description": "Brief explanation for the validity decision"
+				}
+			},
+			"required": ["validity", "tags", "reason"]
+		}
+
+		# Call Gemini API with structured output
 		response = client.models.generate_content(
 			model=model_name,
 			contents=prompt,
 			config={
 				'temperature': 0,  # Deterministic output
-				'max_output_tokens': 1500,  # High limit for thinking models with long emails
+				'max_output_tokens': 1500,
+				'response_mime_type': 'application/json',
+				'response_schema': schema
 			}
 		)
-		logger.error(f"✅ Received response from Gemini: {response}")
+		logger.info(f"✅ Received response from Gemini: {response}")
+
 		# Handle response using structured access
 		if not response or not response.candidates or len(response.candidates) == 0:
 			logger.error(f"❌ Gemini returned empty response. Response object: {response}")
 			raise ValueError("Gemini API returned empty response")
 
 		# Access the exact text from structured response
-		result = response.candidates[0].content.parts[0].text.strip()
-		logger.info(f"🤖 Raw Gemini Response: {result}")
+		result_text = response.candidates[0].content.parts[0].text.strip()
+		logger.info(f"🤖 Raw Gemini Response: {result_text}")
 
-		# Exact match (case-insensitive)
-		if result.lower() == "invalid":
-			final_result = "Invalid"
-		elif result.lower() == "valid":
-			final_result = "Valid"
-		else:
-			# If response is unclear, default based on fail_safe setting
-			logger.warning(f"⚠️  Unclear response from Gemini: {result}")
-			final_result = "Valid" if settings.get("fail_safe") else "Invalid"
+		# Parse JSON response
+		import json
+		try:
+			result = json.loads(result_text)
+		except json.JSONDecodeError as e:
+			logger.error(f"❌ Failed to parse JSON response: {result_text}")
+			raise ValueError(f"Invalid JSON response from Gemini: {str(e)}")
+
+		# Validate response structure
+		if "validity" not in result:
+			logger.warning(f"⚠️  Missing 'validity' field in response: {result}")
+			result["validity"] = "Valid" if settings.get("fail_safe") else "Invalid"
+
+		if "tags" not in result:
+			result["tags"] = []
+
+		if "reason" not in result:
+			result["reason"] = "No reason provided"
+
+		# Normalize validity value
+		result["validity"] = result["validity"].capitalize()
+		if result["validity"] not in ["Valid", "Invalid"]:
+			logger.warning(f"⚠️  Unexpected validity value: {result['validity']}")
+			result["validity"] = "Valid" if settings.get("fail_safe") else "Invalid"
 
 		# Log validation for audit
-		logger.info(f"🤖 Gemini Response: {final_result}")
-		logger.info(f"Result - Sender: {sender_email}, Subject: {subject}, Decision: {final_result}")
+		logger.info(f"🤖 Gemini Response: {result}")
+		logger.info(f"Result - Sender: {sender_email}, Subject: {subject}")
+		logger.info(f"  Validity: {result['validity']}")
+		logger.info(f"  Tags: {result['tags']}")
+		logger.info(f"  Reason: {result['reason']}")
 
-		return final_result
+		return result
 
 	except Exception as e:
 		# Get settings for fail_safe mode
@@ -197,12 +247,14 @@ Raw Email Content:
 		)
 
 		# Use fail_safe setting to determine behavior
-		if settings.get("fail_safe"):
-			logger.warning(f"⚠️  Validation failed for {sender_email}, defaulting to Valid (fail-safe mode)")
-			return "Valid"
-		else:
-			logger.warning(f"⚠️  Validation failed for {sender_email}, defaulting to Invalid (strict mode)")
-			return "Invalid"
+		validity = "Valid" if settings.get("fail_safe") else "Invalid"
+		logger.warning(f"⚠️  Validation failed for {sender_email}, defaulting to {validity}")
+
+		return {
+			"validity": validity,
+			"tags": ["Error"],
+			"reason": f"Validation failed: {str(e)}"
+		}
 
 
 def log_invalid_email(mail_obj):

@@ -149,12 +149,22 @@ Subject: {subject}
 {content}
 """
 
-	# Validate with Gemini
+	# Validate with Gemini (returns structured output)
 	validation_result = validate_email_with_gemini(raw_email, sender, subject)
 	doc.flags.ai_validation_result = validation_result
 
-	# Find or create Lead based on validation result
-	if validation_result == "Valid":
+	# Extract validity from structured response
+	validity = validation_result.get("validity", "Valid")  # Default to Valid for backward compatibility
+	tags = validation_result.get("tags", [])
+	reason = validation_result.get("reason", "No reason provided")
+
+	logger.info(f"📋 Validation Result:")
+	logger.info(f"   Validity: {validity}")
+	logger.info(f"   Tags: {tags}")
+	logger.info(f"   Reason: {reason}")
+
+	# Find or create Lead based on validity field
+	if validity == "Valid":
 		# Valid email - create/find CRM Lead
 		lead = find_or_create_lead(sender, sender_full_name, subject, "CRM Lead")
 
@@ -187,7 +197,7 @@ def add_validation_info_to_communication(doc, method=None):  # noqa: ARG001
 	"""
 	Hook: Communication.after_insert
 
-	Adds validation metadata comment for spam emails
+	Adds validation metadata comment with tags and reason for emails
 
 	Args:
 		doc: Communication document
@@ -196,13 +206,41 @@ def add_validation_info_to_communication(doc, method=None):  # noqa: ARG001
 	if hasattr(doc.flags, 'ai_validation_result'):
 		validation_result = doc.flags.ai_validation_result
 
-		if validation_result == "Invalid":
+		# Extract structured data
+		validity = validation_result.get("validity", "Unknown")
+		tags = validation_result.get("tags", [])
+		reason = validation_result.get("reason", "No reason provided")
+
+		if validity == "Invalid":
+			# Format tags for display
+			tags_html = ", ".join([f"<span style='background: #e3f2fd; padding: 2px 8px; border-radius: 3px; margin: 0 2px;'>{tag}</span>" for tag in tags]) if tags else "None"
+
 			# Add a comment to the Communication
 			comment = f"""
 <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin: 10px 0;">
 	<strong>🤖 AI Validation:</strong> This email was identified as <strong>spam/promotional</strong>
 	<br><br>
+	<strong>Tags:</strong> {tags_html}
+	<br>
+	<strong>Reason:</strong> {reason}
+	<br><br>
 	<em>Email status marked as Spam.</em>
+</div>
+			"""
+
+			doc.add_comment("Info", comment)
+
+		elif validity == "Valid":
+			# Optionally add a comment for valid emails too (with success styling)
+			tags_html = ", ".join([f"<span style='background: #e8f5e9; padding: 2px 8px; border-radius: 3px; margin: 0 2px;'>{tag}</span>" for tag in tags]) if tags else "None"
+
+			comment = f"""
+<div style="background: #e8f5e9; border-left: 4px solid #4caf50; padding: 10px; margin: 10px 0;">
+	<strong>🤖 AI Validation:</strong> This email was identified as <strong>valid lead</strong>
+	<br><br>
+	<strong>Tags:</strong> {tags_html}
+	<br>
+	<strong>Reason:</strong> {reason}
 </div>
 			"""
 
