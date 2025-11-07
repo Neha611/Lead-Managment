@@ -1,7 +1,9 @@
 import frappe
 from frappe import _
+import base64
 
 from crm_override.crm_override.broadcast_utils import send_email_to_segment, create_lead_segment as create_segment
+from frappe.email.receive import InboundMail
 
 @frappe.whitelist()
 def broadcast_to_segment(segment_name, subject, message, sender_email):
@@ -113,4 +115,112 @@ def create_lead_segment(segmentname, leads_data=None, lead_names=None, descripti
         "name": segment.name,
         "segmentname": segment.segmentname,
         "leads": final_lead_names
+    }
+
+@frappe.whitelist(allow_guest=True)
+def ingest_emails_batch(emails_data, email_account_name=None):
+    """
+    API endpoint to ingest a batch of emails through Frappe's email pipeline.
+
+    Args:
+        emails_data: List of email dictionaries, each containing:
+            - raw_email: Base64-encoded raw email message
+            - uid: Unique identifier for this email (optional)
+        email_account_name: Name of Email Account to use (optional, defaults to first active account)
+
+    Returns:
+        Dictionary with batch processing results
+    """
+    # Get email account
+    if not email_account_name:
+        accounts = frappe.get_all(
+            "Email Account",
+            filters={"enable_incoming": 1},
+            fields=["name", "email_id"],
+            limit=1
+        )
+        if not accounts:
+            frappe.throw("No active Email Account found. Please enable incoming email for an account.")
+        email_account_name = accounts[0].name
+
+    email_account = frappe.get_doc("Email Account", email_account_name)
+
+    # Process emails
+    results = []
+    processed = 0
+    skipped = 0
+    errors = 0
+
+    for idx, email_data in enumerate(emails_data):
+        try:
+            # Decode raw email
+            raw_email = base64.b64decode(email_data.get("raw_email"))
+            uid = email_data.get("uid", -(idx + 1))
+
+            # Create InboundMail object
+            inbound_mail = InboundMail(
+                content=raw_email,
+                email_account=email_account,
+                uid=uid,
+                seen_status=1,
+                append_to=None  # Don't auto-create Leads
+            )
+
+            # Get email details for logging
+            subject = inbound_mail.subject[:50] if inbound_mail.subject else "No Subject"
+            sender = inbound_mail.from_email
+
+            try:
+                # Process through pipeline
+                communication = inbound_mail.process()
+                processed += 1
+
+                result = {
+                    "status": "success",
+                    "sender": sender,
+                    "subject": subject,
+                    "communication": communication.name if communication else None
+                }
+
+                # Check AI validation result if available
+                if hasattr(communication, 'flags') and hasattr(communication.flags, 'ai_validation_result'):
+                    result["ai_validation"] = communication.flags.ai_validation_result
+
+                results.append(result)
+
+            except Exception as process_error:
+                error_msg = str(process_error)
+                if "SentEmailInInboxError" in error_msg or "same as recipient" in error_msg:
+                    skipped += 1
+                    results.append({
+                        "status": "skipped",
+                        "sender": sender,
+                        "subject": subject,
+                        "reason": "Sent by same account"
+                    })
+                else:
+                    errors += 1
+                    results.append({
+                        "status": "error",
+                        "sender": sender,
+                        "subject": subject,
+                        "error": error_msg[:200]
+                    })
+
+        except Exception as e:
+            errors += 1
+            results.append({
+                "status": "error",
+                "error": str(e)[:200]
+            })
+
+    # Commit changes
+    frappe.db.commit()
+
+    return {
+        "total": len(emails_data),
+        "processed": processed,
+        "skipped": skipped,
+        "errors": errors,
+        "results": results
     }
