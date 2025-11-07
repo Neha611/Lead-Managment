@@ -45,6 +45,12 @@ class NonLead(Document):
 				"width": "11rem",
 			},
 			{
+				"label": "Tags",
+				"type": "Data",
+				"key": "custom_tags",
+				"width": "12rem",
+			},
+			{
 				"label": "Assigned To",
 				"type": "Text",
 				"key": "_assign",
@@ -64,6 +70,7 @@ class NonLead(Document):
 			"status",
 			"email",
 			"mobile_no",
+			"custom_tags",
 			"territory",
 			"_assign",
 			"modified",
@@ -75,7 +82,7 @@ class NonLead(Document):
 		return {
 			"column_field": "status",
 			"title_field": "lead_name",
-			"kanban_fields": '["organization", "email", "mobile_no", "_assign", "modified"]',
+			"kanban_fields": '["organization", "email", "mobile_no", "custom_tags", "_assign", "modified"]',
 		}
 
 
@@ -116,6 +123,7 @@ def convert_to_lead(rejected_lead_id):
 		"job_title",
 		"gender",
 		"whatsapp_no",
+		"custom_tags",
 	]
 
 	for field in fields_to_copy:

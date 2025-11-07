@@ -5,7 +5,7 @@ from crm_override.crm_override.email_validator import validate_email_with_gemini
 # In production, this goes to supervisor logs
 
 
-def find_or_create_lead(email, full_name, subject, doctype="CRM Lead"):
+def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None):
 	"""
 	Find existing lead by email or create new one with row-level locking to prevent duplicates.
 	Uses SELECT FOR UPDATE with retry logic for race conditions.
@@ -15,6 +15,7 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead"):
 		full_name: Sender full name
 		subject: Email subject
 		doctype: "CRM Lead" or "Non Lead"
+		tags: List of tags from AI validation (optional)
 
 	Returns:
 		Lead document (existing or newly created)
@@ -36,7 +37,22 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead"):
 			if existing_lead:
 				existing_lead_name = existing_lead[0][0]
 				logger.info(f"🔗 Found existing {doctype}: {existing_lead_name} for {email}")
-				return frappe.get_doc(doctype, existing_lead_name)
+				lead = frappe.get_doc(doctype, existing_lead_name)
+
+				# Append new tags to existing tags
+				if tags:
+					existing_tags = lead.get("custom_tags") or ""
+					# Parse existing tags (comma-separated)
+					existing_tags_list = [t.strip() for t in existing_tags.split(",") if t.strip()] if existing_tags else []
+					# Merge with new tags, avoiding duplicates
+					merged_tags = list(set(existing_tags_list + tags))
+					# Update the custom_tags field
+					lead.custom_tags = ", ".join(merged_tags)
+					lead.flags.ignore_mandatory = True
+					lead.save(ignore_permissions=True)
+					logger.info(f"📝 Updated tags for {doctype}: {lead.name} - Tags: {lead.custom_tags}")
+
+				return lead
 
 			# No existing lead found, create new one
 			logger.info(f"➕ Creating new {doctype} for {email} (attempt {attempt + 1}/{max_retries})")
@@ -46,12 +62,13 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead"):
 				"email": email,
 				"first_name": full_name or email.split("@")[0],
 				"lead_name": full_name or email,
+				"custom_tags": ", ".join(tags) if tags else ""
 			})
 
 			lead.flags.ignore_mandatory = True
 			lead.insert(ignore_permissions=True)
 
-			logger.info(f"✅ Created {doctype}: {lead.name}")
+			logger.info(f"✅ Created {doctype}: {lead.name} with tags: {lead.custom_tags}")
 			return lead
 
 		except frappe.DuplicateEntryError:
@@ -62,7 +79,19 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead"):
 			existing_lead_name = frappe.db.get_value(doctype, {"email": email}, "name")
 			if existing_lead_name:
 				logger.info(f"🔄 Retrieved existing lead after duplicate: {existing_lead_name}")
-				return frappe.get_doc(doctype, existing_lead_name)
+				lead = frappe.get_doc(doctype, existing_lead_name)
+
+				# Append tags if provided
+				if tags:
+					existing_tags = lead.get("custom_tags") or ""
+					existing_tags_list = [t.strip() for t in existing_tags.split(",") if t.strip()] if existing_tags else []
+					merged_tags = list(set(existing_tags_list + tags))
+					lead.custom_tags = ", ".join(merged_tags)
+					lead.flags.ignore_mandatory = True
+					lead.save(ignore_permissions=True)
+					logger.info(f"📝 Updated tags for {doctype}: {lead.name} - Tags: {lead.custom_tags}")
+
+				return lead
 
 			if attempt < max_retries - 1:
 				continue
@@ -76,7 +105,19 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead"):
 			existing_lead_name = frappe.db.get_value(doctype, {"email": email}, "name")
 			if existing_lead_name:
 				logger.info(f"🔄 Retrieved lead after error: {existing_lead_name}")
-				return frappe.get_doc(doctype, existing_lead_name)
+				lead = frappe.get_doc(doctype, existing_lead_name)
+
+				# Append tags if provided
+				if tags:
+					existing_tags = lead.get("custom_tags") or ""
+					existing_tags_list = [t.strip() for t in existing_tags.split(",") if t.strip()] if existing_tags else []
+					merged_tags = list(set(existing_tags_list + tags))
+					lead.custom_tags = ", ".join(merged_tags)
+					lead.flags.ignore_mandatory = True
+					lead.save(ignore_permissions=True)
+					logger.info(f"📝 Updated tags for {doctype}: {lead.name} - Tags: {lead.custom_tags}")
+
+				return lead
 
 			if attempt < max_retries - 1:
 				continue
@@ -149,14 +190,24 @@ Subject: {subject}
 {content}
 """
 
-	# Validate with Gemini
+	# Validate with Gemini (returns structured output)
 	validation_result = validate_email_with_gemini(raw_email, sender, subject)
 	doc.flags.ai_validation_result = validation_result
 
-	# Find or create Lead based on validation result
-	if validation_result == "Valid":
+	# Extract validity from structured response
+	validity = validation_result.get("validity", "Valid")  # Default to Valid for backward compatibility
+	tags = validation_result.get("tags", [])
+	reason = validation_result.get("reason", "No reason provided")
+
+	logger.info(f"📋 Validation Result:")
+	logger.info(f"   Validity: {validity}")
+	logger.info(f"   Tags: {tags}")
+	logger.info(f"   Reason: {reason}")
+
+	# Find or create Lead based on validity field
+	if validity == "Valid":
 		# Valid email - create/find CRM Lead
-		lead = find_or_create_lead(sender, sender_full_name, subject, "CRM Lead")
+		lead = find_or_create_lead(sender, sender_full_name, subject, "CRM Lead", tags=tags)
 
 		# Set reference fields
 		doc.reference_doctype = "CRM Lead"
@@ -169,7 +220,7 @@ Subject: {subject}
 
 	else:
 		# Invalid email - create/find Non Lead
-		lead = find_or_create_lead(sender, sender_full_name, subject, "Non Lead")
+		lead = find_or_create_lead(sender, sender_full_name, subject, "Non Lead", tags=tags)
 
 		# Set reference fields
 		doc.reference_doctype = "Non Lead"
@@ -187,7 +238,7 @@ def add_validation_info_to_communication(doc, method=None):  # noqa: ARG001
 	"""
 	Hook: Communication.after_insert
 
-	Adds validation metadata comment for spam emails
+	Adds validation metadata comment with tags and reason for emails
 
 	Args:
 		doc: Communication document
@@ -196,13 +247,41 @@ def add_validation_info_to_communication(doc, method=None):  # noqa: ARG001
 	if hasattr(doc.flags, 'ai_validation_result'):
 		validation_result = doc.flags.ai_validation_result
 
-		if validation_result == "Invalid":
+		# Extract structured data
+		validity = validation_result.get("validity", "Unknown")
+		tags = validation_result.get("tags", [])
+		reason = validation_result.get("reason", "No reason provided")
+
+		if validity == "Invalid":
+			# Format tags for display
+			tags_html = ", ".join([f"<span style='background: #e3f2fd; padding: 2px 8px; border-radius: 3px; margin: 0 2px;'>{tag}</span>" for tag in tags]) if tags else "None"
+
 			# Add a comment to the Communication
 			comment = f"""
 <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin: 10px 0;">
 	<strong>🤖 AI Validation:</strong> This email was identified as <strong>spam/promotional</strong>
 	<br><br>
+	<strong>Tags:</strong> {tags_html}
+	<br>
+	<strong>Reason:</strong> {reason}
+	<br><br>
 	<em>Email status marked as Spam.</em>
+</div>
+			"""
+
+			doc.add_comment("Info", comment)
+
+		elif validity == "Valid":
+			# Optionally add a comment for valid emails too (with success styling)
+			tags_html = ", ".join([f"<span style='background: #e8f5e9; padding: 2px 8px; border-radius: 3px; margin: 0 2px;'>{tag}</span>" for tag in tags]) if tags else "None"
+
+			comment = f"""
+<div style="background: #e8f5e9; border-left: 4px solid #4caf50; padding: 10px; margin: 10px 0;">
+	<strong>🤖 AI Validation:</strong> This email was identified as <strong>valid lead</strong>
+	<br><br>
+	<strong>Tags:</strong> {tags_html}
+	<br>
+	<strong>Reason:</strong> {reason}
 </div>
 			"""
 
