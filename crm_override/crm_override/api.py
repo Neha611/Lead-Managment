@@ -1,6 +1,8 @@
 import frappe
 from frappe import _
 import base64
+import email
+from email import policy
 
 from crm_override.crm_override.broadcast_utils import send_email_to_segment, create_lead_segment as create_segment
 from frappe.email.receive import InboundMail
@@ -117,6 +119,65 @@ def create_lead_segment(segmentname, leads_data=None, lead_names=None, descripti
         "leads": final_lead_names
     }
 
+def find_existing_lead_for_email(sender_email):
+    """
+    Check if email exists in CRM Lead, Non Lead, or Query.
+    Returns: (doctype, name) or (None, None)
+
+    Args:
+        sender_email: Email address to check
+
+    Returns:
+        tuple: (doctype_name, record_name) if found, else (None, None)
+    """
+    if not sender_email:
+        return (None, None)
+
+    # Check CRM Lead
+    crm_lead = frappe.db.get_value("CRM Lead", {"email": sender_email}, "name")
+    if crm_lead:
+        return ("CRM Lead", crm_lead)
+
+    # Check Non Lead
+    non_lead = frappe.db.get_value("Non Lead", {"email": sender_email}, "name")
+    if non_lead:
+        return ("Non Lead", non_lead)
+
+    # Check Query
+    query = frappe.db.get_value("Query", {"email": sender_email}, "name")
+    if query:
+        return ("Query", query)
+
+    return (None, None)
+
+
+def extract_sender_from_raw_email(raw_email):
+    """
+    Extract sender email from raw email bytes.
+
+    Args:
+        raw_email: Raw email bytes
+
+    Returns:
+        str: Sender email address
+    """
+    try:
+        # Parse email using email library
+        msg = email.message_from_bytes(raw_email, policy=policy.default)
+        from_header = msg.get('From', '')
+
+        # Extract email from "Name <email@example.com>" format
+        if '<' in from_header and '>' in from_header:
+            sender_email = from_header.split('<')[1].split('>')[0].strip()
+        else:
+            sender_email = from_header.strip()
+
+        return sender_email.lower()
+    except Exception as e:
+        frappe.logger().error(f"Failed to extract sender from raw email: {str(e)}")
+        return None
+
+
 @frappe.whitelist(allow_guest=True)
 def ingest_emails_batch(emails_data, email_account_name=None):
     """
@@ -157,6 +218,12 @@ def ingest_emails_batch(emails_data, email_account_name=None):
             raw_email = base64.b64decode(email_data.get("raw_email"))
             uid = email_data.get("uid", -(idx + 1))
 
+            # Extract sender email to check for existing lead
+            sender_email = extract_sender_from_raw_email(raw_email)
+
+            # Check if sender exists in any category
+            existing_doctype, existing_name = find_existing_lead_for_email(sender_email)
+
             # Create InboundMail object
             inbound_mail = InboundMail(
                 content=raw_email,
@@ -165,6 +232,17 @@ def ingest_emails_batch(emails_data, email_account_name=None):
                 seen_status=1,
                 append_to=None  # Don't auto-create Leads
             )
+
+            # Set flags based on existing lead
+            if existing_doctype and existing_name:
+                # Known contact - skip validation, link directly
+                inbound_mail.flags.skip_validation = True
+                inbound_mail.flags.link_to_doctype = existing_doctype
+                inbound_mail.flags.link_to_name = existing_name
+            else:
+                # New contact - validate immediately
+                inbound_mail.flags.skip_validation = False
+                inbound_mail.flags.validate_immediately = True
 
             # Get email details for logging
             subject = inbound_mail.subject[:50] if inbound_mail.subject else "No Subject"

@@ -5,6 +5,116 @@ from crm_override.crm_override.email_validator import validate_email_with_gemini
 # In production, this goes to supervisor logs
 
 
+# Legacy function - kept for reference
+# def create_audit_record(communication_doc, lead_doctype, lead_name, category, reason, validation_method="Auto"):
+# 	"""
+# 	Create an Email Validation Audit record for tracking.
+#
+# 	Args:
+# 		communication_doc: Communication document
+# 		lead_doctype: Type of lead created (CRM Lead/Non Lead/Query)
+# 		lead_name: Name of the lead record
+# 		category: Validation category (Lead/Non Lead/Query)
+# 		reason: AI validation reason
+# 		validation_method: "Auto" or "Manual" (default: "Auto")
+# 	"""
+# 	try:
+# 		audit = frappe.get_doc({
+# 			"doctype": "Email Validation Audit",
+# 			"communication": communication_doc.name,
+# 			"lead_doctype": lead_doctype,
+# 			"lead_name": lead_name,
+# 			"category": category,
+# 			"validation_reason": reason,
+# 			"sender_email": communication_doc.sender,
+# 			"subject": communication_doc.subject,
+# 			"validated_on": frappe.utils.now(),
+# 			"validation_method": validation_method
+# 		})
+# 		audit.insert(ignore_permissions=True)
+# 		frappe.db.commit()
+# 	except Exception as e:
+# 		frappe.logger().error(f"Failed to create audit record: {str(e)}")
+
+def create_audit_record(communication_doc, lead_doctype, lead_name, category, reason, validation_method="Auto"):
+    """
+    Enhanced version of create_audit_record with better error handling, logging and database checks.
+
+    Args:
+        communication_doc: Communication document
+        lead_doctype: Type of lead created (CRM Lead/Non Lead/Query)
+        lead_name: Name of the lead record
+        category: Validation category (Lead/Non Lead/Query)
+        reason: AI validation reason
+        validation_method: "Auto" or "Manual" (default: "Auto")
+    """
+    # Get dedicated logger
+    logger = frappe.logger("email_validation", allow_site=True, file_count=5)
+    
+    try:
+        # Validate communication doc exists in database
+        if not communication_doc or not communication_doc.name:
+            logger.error("Communication document is None or missing name!")
+            return
+            
+        if not frappe.db.exists("Communication", communication_doc.name):
+            # Try to commit in case it's just not committed yet
+            frappe.db.commit()
+            if not frappe.db.exists("Communication", communication_doc.name):
+                logger.error(f"Communication doc {communication_doc.name} does not exist in database!")
+                return
+                
+        # Validate lead exists
+        if not frappe.db.exists(lead_doctype, lead_name):
+            logger.error(f"Lead {lead_name} of type {lead_doctype} does not exist!")
+            return
+
+        # Log the attempt
+        logger.info(f"Creating audit record for communication: {communication_doc.name}")
+        logger.info(f"Lead: {lead_doctype} - {lead_name}")
+        logger.info(f"Category: {category}")
+
+        # Create and insert audit record
+        try:
+            audit = frappe.get_doc({
+                "doctype": "Email Validation Audit",
+                "communication": communication_doc.name,
+                "sender_email": communication_doc.sender,
+                "subject": communication_doc.subject or "No Subject",
+                "validated_on": frappe.utils.now(),
+                "validation_method": validation_method,
+                "category": category,
+                "validation_reason": reason,
+                "lead_doctype": lead_doctype,
+                "lead_name": lead_name
+            })
+
+            # Insert with ignore_permissions (this will automatically validate)
+            audit.insert(ignore_permissions=True)
+            frappe.db.commit()
+
+            logger.info(f"✅ Successfully created audit record: {audit.name}")
+            return audit
+
+        except Exception as e:
+            logger.error(f"❌ Failed to create audit record:")
+            logger.error(f"   Error Type: {type(e).__name__}")
+            logger.error(f"   Error Message: {str(e)}")
+            logger.error(f"   Traceback: {frappe.get_traceback()}")
+            frappe.db.rollback()
+            raise
+            
+    except Exception as e:
+        logger.error("Unexpected error in create_audit_record:")
+        logger.error(f"Error Type: {type(e).__name__}")
+        logger.error(f"Error Message: {str(e)}")
+        if hasattr(e, "args"):
+            logger.error(f"Error Args: {e.args}")
+        frappe.db.rollback()
+        # Re-raise the exception after logging
+        raise
+
+
 def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None):
 	"""
 	Find existing lead by email or create new one with row-level locking to prevent duplicates.
@@ -129,10 +239,14 @@ def validate_before_linking_to_lead(doc, method=None):
 	"""
 	Hook: Communication.before_insert
 
-	New Flow:
-	1. Validates incoming emails with Gemini
-	2. If VALID: Creates/finds CRM Lead and links Communication
-	3. If INVALID: Creates/finds Non Lead and links Communication
+	New Flow (immediate validation with smart pre-linking):
+	1. Check if skip_validation flag is set (existing lead found)
+	   → Link to existing lead, set validation_status="Linked", exit
+	2. Check if validate_immediately flag is set (new sender)
+	   → Run AI validation immediately, create audit record
+	3. Legacy fallback: Old behavior for manually created Communications
+	   → Validates incoming emails with Gemini
+	   → Creates appropriate lead (CRM Lead/Non Lead/Query)
 
 	Args:
 		doc: Communication document
@@ -153,10 +267,37 @@ def validate_before_linking_to_lead(doc, method=None):
 		logger.info("  ❌ Skipping: Not received email")
 		return
 
-	# Skip if validation is disabled
-	if not is_validation_enabled():
-		logger.warning("  ❌ Validation disabled in settings, skipping")
-		return
+	# ==================== NEW LOGIC: Check flags from InboundMail ====================
+
+	# Case 1: Existing lead found during ingestion (skip validation)
+	if hasattr(doc, 'flags') and getattr(doc.flags, 'skip_validation', False):
+		link_doctype = getattr(doc.flags, 'link_to_doctype', None)
+		link_name = getattr(doc.flags, 'link_to_name', None)
+
+		if link_doctype and link_name:
+			doc.reference_doctype = link_doctype
+			doc.reference_name = link_name
+			doc.validation_status = "Linked"
+
+			logger.info(f"✅ EXISTING CONTACT: Linked to {link_doctype}: {link_name}")
+			logger.info(f"   Validation skipped - known sender")
+			return  # Exit early, no validation needed
+
+	# Case 2: New sender, validate immediately
+	validate_immediately = hasattr(doc, 'flags') and getattr(doc.flags, 'validate_immediately', False)
+
+	if validate_immediately:
+		logger.info(f"⚡ NEW CONTACT: Validating immediately - {doc.sender}")
+		# Fall through to validation logic below
+
+	# ==================== VALIDATION LOGIC (for both immediate and manual Communications) ====================
+
+	# If not validate_immediately, check if this is a manually created Communication
+	if not validate_immediately:
+		# Skip if validation is disabled for manual Communications
+		if not is_validation_enabled():
+			logger.warning("  ❌ Validation disabled in settings, skipping")
+			return
 
 	# CRITICAL FIX: Check if reference was already set by Email Account's append_to setting
 	# This prevents duplicate lead creation
@@ -194,32 +335,38 @@ Subject: {subject}
 	validation_result = validate_email_with_gemini(raw_email, sender, subject)
 	doc.flags.ai_validation_result = validation_result
 
-	# Extract validity from structured response
-	validity = validation_result.get("validity", "Valid")  # Default to Valid for backward compatibility
+	# Extract category from structured response (Lead/Non Lead/Query)
+	category = validation_result.get("category", "Lead")  # Default to Lead for backward compatibility
 	tags = validation_result.get("tags", [])
 	reason = validation_result.get("reason", "No reason provided")
 
 	logger.info(f"📋 Validation Result:")
-	logger.info(f"   Validity: {validity}")
+	logger.info(f"   Category: {category}")
 	logger.info(f"   Tags: {tags}")
 	logger.info(f"   Reason: {reason}")
 
-	# Find or create Lead based on validity field
-	if validity == "Valid":
-		# Valid email - create/find CRM Lead
+	# Set validation fields
+	doc.validation_status = "Validated"
+	doc.validation_category = category
+	doc.validation_reason = reason
+	doc.validated_on = frappe.utils.now()
+
+	# Find or create Lead based on category
+	if category == "Lead":
+		# Lead email - create/find CRM Lead
 		lead = find_or_create_lead(sender, sender_full_name, subject, "CRM Lead", tags=tags)
 
 		# Set reference fields
 		doc.reference_doctype = "CRM Lead"
 		doc.reference_name = lead.name
 
-		logger.info("✅ VALID EMAIL")
+		logger.info("✅ LEAD EMAIL")
 		logger.info(f"✅ Successfully linked Communication to CRM Lead: {lead.name}")
 		logger.info(f"   reference_doctype: {doc.reference_doctype}")
 		logger.info(f"   reference_name: {doc.reference_name}")
 
-	else:
-		# Invalid email - create/find Non Lead
+	elif category == "Non Lead":
+		# Non Lead email - create/find Non Lead
 		lead = find_or_create_lead(sender, sender_full_name, subject, "Non Lead", tags=tags)
 
 		# Set reference fields
@@ -227,18 +374,32 @@ Subject: {subject}
 		doc.reference_name = lead.name
 		doc.email_status = "Spam"
 
-		logger.warning("❌ INVALID EMAIL (Spam/Promotional)")
+		logger.warning("❌ NON LEAD EMAIL (Spam/Promotional)")
 		logger.warning(f"❌ Successfully linked Communication to Non Lead: {lead.name}")
 		logger.warning(f"   reference_doctype: {doc.reference_doctype}")
 		logger.warning(f"   reference_name: {doc.reference_name}")
 		logger.warning("="*80)
+
+	elif category == "Query":
+		# Query email - create/find Query
+		lead = find_or_create_lead(sender, sender_full_name, subject, "Query", tags=tags)
+
+		# Set reference fields
+		doc.reference_doctype = "Query"
+		doc.reference_name = lead.name
+
+		logger.info("🔍 QUERY EMAIL (Customer Support)")
+		logger.info(f"✅ Successfully linked Communication to Query: {lead.name}")
+		logger.info(f"   reference_doctype: {doc.reference_doctype}")
+		logger.info(f"   reference_name: {doc.reference_name}")
 
 
 def add_validation_info_to_communication(doc, method=None):  # noqa: ARG001
 	"""
 	Hook: Communication.after_insert
 
-	Adds validation metadata comment with tags and reason for emails
+	Adds validation metadata comment with tags and reason for emails.
+	Also creates audit record after the Communication has been inserted.
 
 	Args:
 		doc: Communication document
@@ -248,9 +409,18 @@ def add_validation_info_to_communication(doc, method=None):  # noqa: ARG001
 		validation_result = doc.flags.ai_validation_result
 
 		# Extract structured data
-		validity = validation_result.get("validity", "Unknown")
+		category = validation_result.get("category", "Lead")
 		tags = validation_result.get("tags", [])
 		reason = validation_result.get("reason", "No reason provided")
+		validity = validation_result.get("validity", "Unknown")
+
+		# Create audit record now that Communication has been inserted and has a name
+		if doc.reference_doctype and doc.reference_name:
+			try:
+				create_audit_record(doc, doc.reference_doctype, doc.reference_name, category, reason)
+			except Exception as e:
+				logger = frappe.logger("email_validation", allow_site=True, file_count=5)
+				logger.error(f"Failed to create audit record in after_insert: {str(e)}")
 
 		if validity == "Invalid":
 			# Format tags for display

@@ -1,5 +1,5 @@
 import frappe
-from google import genai
+import requests
 
 
 def get_validation_settings():
@@ -118,7 +118,7 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 
 	Returns:
 		dict: {
-			"validity": "Valid" or "Invalid",
+			"category": "Lead", "Non Lead", or "Query",
 			"tags": ["tag1", "tag2", ...],
 			"reason": "Explanation text"
 		}
@@ -143,7 +143,7 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 				message="Please set 'gemini_api_key' in Custom Email Validator Settings or site_config.json"
 			)
 			# Fail-safe: allow email if no API key configured
-			return {"validity": "Valid", "tags": ["No API Key"], "reason": "API key not configured, defaulting to Valid"}
+			return {"category": "Lead", "tags": ["No API Key"], "reason": "API key not configured, defaulting to Lead"}
 
 		# Convert bytes to string if needed
 		if isinstance(raw_email_content, bytes):
@@ -155,114 +155,46 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 			email_text = str(raw_email_content)
 
 
-		# Initialize Gemini client
-		client = genai.Client(api_key=api_key)
-
-		# Use custom prompt if available, otherwise use default
-		custom_prompt_raw = settings.get("custom_prompt")
-		logger.info(f"🔍 Custom prompt retrieved from settings: {custom_prompt_raw[:200] if custom_prompt_raw else 'None'}...")
-
-		if custom_prompt_raw and custom_prompt_raw.strip():
-			# Strip HTML tags from custom prompt (if user used Text Editor field)
-			import re
-			prompt_template = re.sub(r'<[^>]+>', '', custom_prompt_raw)  # Remove HTML tags
-			prompt_template = prompt_template.strip()
-
-			if prompt_template:
-				logger.info(f"✅ Using CUSTOM prompt (length: {len(prompt_template)} chars)")
-				logger.info(f"   First 200 chars: {prompt_template[:200]}...")
-				prompt = f"{prompt_template}\n\nRaw Email Content:\n{email_text}"
-			else:
-				logger.warning("⚠️ Custom prompt became empty after HTML stripping, using DEFAULT prompt")
-				custom_prompt_raw = None  # Force fallback to default
-
-		if not custom_prompt_raw or not custom_prompt_raw.strip():
-			# Default validation prompt
-			logger.info(f"📄 Using DEFAULT hardcoded prompt")
-			prompt = f"""You are an email validation system. Analyze the following raw email and determine if it's legitimate or spam/invalid.
-
-Consider the following criteria for INVALID emails:
-- Phishing attempts
-- Obvious spam (lottery, prince scams, etc.)
-- Malicious content
-- Bulk marketing emails with no value
-- Suspicious sender patterns
-
-Consider the following criteria for VALID emails:
-- Legitimate business emails
-- Personal communications
-- Transactional emails (receipts, confirmations)
-- Professional correspondence
-- Automated system notifications from legitimate services
-
-You must respond with a structured JSON object containing:
-- "validity": Either "Valid" or "Invalid"
-- "tags": Array of relevant tags describing the email (e.g., country, product type, business category)
-- "reason": Brief explanation of your decision
-
-Raw Email Content:
-{email_text}
-"""
-
-		# Get model name from settings
-		model_name = settings.get("model", "gemini-2.0-flash-exp")
-
-		# Define schema for structured output
-		schema = {
-			"type": "object",
-			"properties": {
-				"validity": {
-					"type": "string",
-					"enum": ["Valid", "Invalid"],
-					"description": "Whether the email is valid or invalid"
-				},
-				"tags": {
-					"type": "array",
-					"items": {"type": "string"},
-					"description": "Relevant tags describing the email content"
-				},
-				"reason": {
-					"type": "string",
-					"description": "Brief explanation for the validity decision"
-				}
-			},
-			"required": ["validity", "tags", "reason"]
-		}
-
-		# Call Gemini API with structured output
-		response = client.models.generate_content(
-			model=model_name,
-			contents=prompt,
-			config={
-				'temperature': 0,  # Deterministic output
-				'max_output_tokens': 1500,
-				'response_mime_type': 'application/json',
-				'response_schema': schema
-			}
-		)
-		logger.info(f"✅ Received response from Gemini: {response}")
-
-		# Handle response using structured access
-		if not response or not response.candidates or len(response.candidates) == 0:
-			logger.error(f"❌ Gemini returned empty response. Response object: {response}")
-			raise ValueError("Gemini API returned empty response")
-
-		# Access the exact text from structured response
-		result_text = response.candidates[0].content.parts[0].text.strip()
-		logger.info(f"🤖 Raw Gemini Response: {result_text}")
-
-		# Parse JSON response
-		import json
+		# Call AI validation API
 		try:
-			result = json.loads(result_text)
-		except json.JSONDecodeError as e:
-			logger.error(f"❌ Failed to parse JSON response: {result_text}")
-			raise ValueError(f"Invalid JSON response from Gemini: {str(e)}")
+			print("API KEY FOR DIFY")
+			print(api_key)
+			# logger.warning("⚠️  Temporary debug log before API call", api_key)
+			response = requests.post(
+				"https://lab.tradyon.ai/v1/workflows/run",
+				headers={
+					"Authorization": f"Bearer {api_key}",
+					"Content-Type": "application/json"
+				},
+				json={
+					"inputs": {"raw_email": email_text},
+					"response_mode": "blocking",
+					"user": "TradyonCRM"
+				},
+				timeout=30
+			)
+
+			if response.status_code != 200:
+				logger.error(f"❌ API request failed with status {response.status_code}", response.text)
+				raise ValueError(f"API request failed with status {response.status_code}")
+
+			api_response = response.json()
+			logger.info(f"✅ Received response from API: {api_response}")
+
+			if not api_response.get("data", {}).get("outputs", {}).get("output"):
+				logger.error(f"❌ Invalid API response structure: {api_response}")
+				raise ValueError("Invalid API response structure")
+
+			result = api_response["data"]["outputs"]["output"]
+
+		except requests.RequestException as e:
+			logger.error(f"❌ HTTP request failed: {str(e)}")
+			raise ValueError(f"HTTP request failed: {str(e)}")
 
 		# Validate response structure
-		if "validity" not in result:
-			logger.warning(f"⚠️  Missing 'validity' field in response: {result}")
-			result["validity"] = "Valid" if settings.get("fail_safe") else "Invalid"
+		if "category" not in result:
+			logger.warning(f"⚠️  Missing 'category' field in response: {result}")
+			result["category"] = "Lead" if settings.get("fail_safe") else "Non Lead"
 
 		if "tags" not in result:
 			result["tags"] = []
@@ -270,16 +202,16 @@ Raw Email Content:
 		if "reason" not in result:
 			result["reason"] = "No reason provided"
 
-		# Normalize validity value
-		result["validity"] = result["validity"].capitalize()
-		if result["validity"] not in ["Valid", "Invalid"]:
-			logger.warning(f"⚠️  Unexpected validity value: {result['validity']}")
-			result["validity"] = "Valid" if settings.get("fail_safe") else "Invalid"
+		# Normalize category value
+		result["category"] = result["category"].strip()
+		if result["category"] not in ["Lead", "Non Lead", "Query"]:
+			logger.warning(f"⚠️  Unexpected category value: {result['category']}")
+			result["category"] = "Lead" if settings.get("fail_safe") else "Non Lead"
 
 		# Log validation for audit
 		logger.info(f"🤖 Gemini Response: {result}")
 		logger.info(f"Result - Sender: {sender_email}, Subject: {subject}")
-		logger.info(f"  Validity: {result['validity']}")
+		logger.info(f"  Category: {result['category']}")
 		logger.info(f"  Tags: {result['tags']}")
 		logger.info(f"  Reason: {result['reason']}")
 
@@ -306,11 +238,11 @@ Raw Email Content:
 		)
 
 		# Use fail_safe setting to determine behavior
-		validity = "Valid" if settings.get("fail_safe") else "Invalid"
-		logger.warning(f"⚠️  Validation failed for {sender_email}, defaulting to {validity}")
+		category = "Lead" if settings.get("fail_safe") else "Non Lead"
+		logger.warning(f"⚠️  Validation failed for {sender_email}, defaulting to {category}")
 
 		return {
-			"validity": validity,
+			"category": category,
 			"tags": ["Error"],
 			"reason": f"Validation failed: {str(e)}"
 		}
