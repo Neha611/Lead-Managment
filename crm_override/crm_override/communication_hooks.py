@@ -115,6 +115,31 @@ def create_audit_record(communication_doc, lead_doctype, lead_name, category, re
         raise
 
 
+@frappe.whitelist(allow_guest=True, methods=["POST", "GET"])
+def api_test_endpoint():
+    """
+    Simple test endpoint to verify API is working.
+    """
+    return {
+        "status": "success",
+        "message": "API is working correctly",
+        "timestamp": frappe.utils.now()
+    }
+
+@frappe.whitelist(allow_guest=True, methods=["POST", "GET"])
+def api_find_or_create_lead(email, full_name=None, subject=None, doctype="CRM Lead", tags=None):
+    """
+    API endpoint to find or create a lead.
+    Expects: email (str), full_name (str), subject (str), doctype (str), tags (list or comma-separated str)
+    """
+    frappe.flags.ignore_csrf = True
+    print("Full name received: ", full_name)
+    if tags and isinstance(tags, str):
+        tags = [t.strip() for t in tags.split(",") if t.strip()]
+    lead = find_or_create_lead(email, full_name, subject, doctype, tags)
+    print("Lead created: ", lead)
+    return {"lead_name": lead.name, "doctype": doctype}
+
 def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None):
 	"""
 	Find existing lead by email or create new one with row-level locking to prevent duplicates.
@@ -131,7 +156,7 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 		Lead document (existing or newly created)
 	"""
 	logger = frappe.logger("email_validation", allow_site=True, file_count=5)
-
+	print("FIND OR CREATE LEAD CALLED")
 	max_retries = 3
 	for attempt in range(max_retries):
 		try:

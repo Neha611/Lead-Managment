@@ -173,7 +173,7 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 				},
 				timeout=30
 			)
-
+			print(response.json())
 			if response.status_code != 200:
 				logger.error(f"❌ API request failed with status {response.status_code}", response.text)
 				raise ValueError(f"API request failed with status {response.status_code}")
