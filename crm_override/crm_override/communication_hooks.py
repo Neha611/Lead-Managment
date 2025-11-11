@@ -127,23 +127,24 @@ def api_test_endpoint():
     }
 
 @frappe.whitelist(allow_guest=True, methods=["POST", "GET"])
-def api_find_or_create_lead(email, full_name=None, subject=None, doctype="CRM Lead", tags=None):
+def api_find_or_create_lead(email, full_name=None, subject=None, doctype="CRM Lead", tags=None, organization=None):
     """
     API endpoint to find or create a lead.
-    Expects: email (str), full_name (str), subject (str), doctype (str), tags (list or comma-separated str)
+    Expects: email (str), full_name (str), subject (str), doctype (str), tags (list or comma-separated str), organization (str)
     """
     frappe.flags.ignore_csrf = True
     print("Full name received: ", full_name)
     if tags and isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
-    lead = find_or_create_lead(email, full_name, subject, doctype, tags)
+    lead = find_or_create_lead(email, full_name, subject, doctype, tags, organization)
     print("Lead created: ", lead)
     return {"lead_name": lead.name, "doctype": doctype}
 
-def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None):
+def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None, organization=None):
 	"""
 	Find existing lead by email or create new one with row-level locking to prevent duplicates.
 	Uses SELECT FOR UPDATE with retry logic for race conditions.
+	Performs upsert operation - updates existing lead with new field values.
 
 	Args:
 		email: Sender email address
@@ -151,6 +152,7 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 		subject: Email subject
 		doctype: "CRM Lead" or "Non Lead"
 		tags: List of tags from AI validation (optional)
+		organization: Organization name (optional)
 
 	Returns:
 		Lead document (existing or newly created)
@@ -174,36 +176,66 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 				logger.info(f"🔗 Found existing {doctype}: {existing_lead_name} for {email}")
 				lead = frappe.get_doc(doctype, existing_lead_name)
 
-				# Append new tags to existing tags
+				# Upsert operation - update fields with new values if provided
+				updated = False
+
+				# Update tags
 				if tags:
 					existing_tags = lead.get("custom_tags") or ""
 					# Parse existing tags (comma-separated)
 					existing_tags_list = [t.strip() for t in existing_tags.split(",") if t.strip()] if existing_tags else []
 					# Merge with new tags, avoiding duplicates
 					merged_tags = list(set(existing_tags_list + tags))
-					# Update the custom_tags field
-					lead.custom_tags = ", ".join(merged_tags)
+					new_tags_value = ", ".join(merged_tags)
+					if lead.custom_tags != new_tags_value:
+						lead.custom_tags = new_tags_value
+						updated = True
+
+				# Update organization if provided
+				if organization:
+					if lead.get("organization") != organization:
+						lead.organization = organization
+						updated = True
+						logger.info(f"📝 Updating organization for {doctype}: {lead.name} - Organization: {organization}")
+
+				# Update full_name if provided and different
+				if full_name and lead.get("lead_name") != full_name:
+					lead.lead_name = full_name
+					if hasattr(lead, "first_name"):
+						lead.first_name = full_name
+					updated = True
+
+				# Save only if something was updated
+				if updated:
 					lead.flags.ignore_mandatory = True
 					lead.save(ignore_permissions=True)
-					logger.info(f"📝 Updated tags for {doctype}: {lead.name} - Tags: {lead.custom_tags}")
+					logger.info(f"📝 Updated {doctype}: {lead.name} - Tags: {lead.custom_tags}, Organization: {lead.get('organization', 'N/A')}")
+				else:
+					logger.info(f"ℹ️ No updates needed for {doctype}: {lead.name}")
 
 				return lead
 
 			# No existing lead found, create new one
 			logger.info(f"➕ Creating new {doctype} for {email} (attempt {attempt + 1}/{max_retries})")
 
-			lead = frappe.get_doc({
+			lead_data = {
 				"doctype": doctype,
 				"email": email,
 				"first_name": full_name or email.split("@")[0],
 				"lead_name": full_name or email,
 				"custom_tags": ", ".join(tags) if tags else ""
-			})
+			}
+
+			# Add organization if provided
+			if organization:
+				lead_data["organization"] = organization
+
+			lead = frappe.get_doc(lead_data)
 
 			lead.flags.ignore_mandatory = True
 			lead.insert(ignore_permissions=True)
 
-			logger.info(f"✅ Created {doctype}: {lead.name} with tags: {lead.custom_tags}")
+			logger.info(f"✅ Created {doctype}: {lead.name} with tags: {lead.custom_tags}, organization: {lead.get('organization', 'N/A')}")
 			return lead
 
 		except frappe.DuplicateEntryError:
@@ -216,15 +248,37 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 				logger.info(f"🔄 Retrieved existing lead after duplicate: {existing_lead_name}")
 				lead = frappe.get_doc(doctype, existing_lead_name)
 
-				# Append tags if provided
+				# Upsert operation - update fields with new values if provided
+				updated = False
+
+				# Update tags
 				if tags:
 					existing_tags = lead.get("custom_tags") or ""
 					existing_tags_list = [t.strip() for t in existing_tags.split(",") if t.strip()] if existing_tags else []
 					merged_tags = list(set(existing_tags_list + tags))
-					lead.custom_tags = ", ".join(merged_tags)
+					new_tags_value = ", ".join(merged_tags)
+					if lead.custom_tags != new_tags_value:
+						lead.custom_tags = new_tags_value
+						updated = True
+
+				# Update organization if provided
+				if organization:
+					if lead.get("organization") != organization:
+						lead.organization = organization
+						updated = True
+
+				# Update full_name if provided and different
+				if full_name and lead.get("lead_name") != full_name:
+					lead.lead_name = full_name
+					if hasattr(lead, "first_name"):
+						lead.first_name = full_name
+					updated = True
+
+				# Save only if something was updated
+				if updated:
 					lead.flags.ignore_mandatory = True
 					lead.save(ignore_permissions=True)
-					logger.info(f"📝 Updated tags for {doctype}: {lead.name} - Tags: {lead.custom_tags}")
+					logger.info(f"📝 Updated {doctype}: {lead.name} - Tags: {lead.custom_tags}, Organization: {lead.get('organization', 'N/A')}")
 
 				return lead
 
@@ -242,15 +296,37 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 				logger.info(f"🔄 Retrieved lead after error: {existing_lead_name}")
 				lead = frappe.get_doc(doctype, existing_lead_name)
 
-				# Append tags if provided
+				# Upsert operation - update fields with new values if provided
+				updated = False
+
+				# Update tags
 				if tags:
 					existing_tags = lead.get("custom_tags") or ""
 					existing_tags_list = [t.strip() for t in existing_tags.split(",") if t.strip()] if existing_tags else []
 					merged_tags = list(set(existing_tags_list + tags))
-					lead.custom_tags = ", ".join(merged_tags)
+					new_tags_value = ", ".join(merged_tags)
+					if lead.custom_tags != new_tags_value:
+						lead.custom_tags = new_tags_value
+						updated = True
+
+				# Update organization if provided
+				if organization:
+					if lead.get("organization") != organization:
+						lead.organization = organization
+						updated = True
+
+				# Update full_name if provided and different
+				if full_name and lead.get("lead_name") != full_name:
+					lead.lead_name = full_name
+					if hasattr(lead, "first_name"):
+						lead.first_name = full_name
+					updated = True
+
+				# Save only if something was updated
+				if updated:
 					lead.flags.ignore_mandatory = True
 					lead.save(ignore_permissions=True)
-					logger.info(f"📝 Updated tags for {doctype}: {lead.name} - Tags: {lead.custom_tags}")
+					logger.info(f"📝 Updated {doctype}: {lead.name} - Tags: {lead.custom_tags}, Organization: {lead.get('organization', 'N/A')}")
 
 				return lead
 
@@ -358,11 +434,14 @@ Subject: {subject}
 
 	# Validate with Gemini (returns structured output)
 	validation_result = validate_email_with_gemini(raw_email, sender, subject)
+	print("This is the validation result: ")
+	print(validation_result)
 	doc.flags.ai_validation_result = validation_result
 
 	# Extract category from structured response (Lead/Non Lead/Query)
 	category = validation_result.get("category", "Lead")  # Default to Lead for backward compatibility
 	tags = validation_result.get("tags", [])
+	organization = validation_result.get("organization", None)
 	reason = validation_result.get("reason", "No reason provided")
 
 	logger.info(f"📋 Validation Result:")
@@ -379,7 +458,7 @@ Subject: {subject}
 	# Find or create Lead based on category
 	if category == "Lead":
 		# Lead email - create/find CRM Lead
-		lead = find_or_create_lead(sender, sender_full_name, subject, "CRM Lead", tags=tags)
+		lead = find_or_create_lead(sender, sender_full_name, subject, "CRM Lead", tags=tags, organization=organization)
 
 		# Set reference fields
 		doc.reference_doctype = "CRM Lead"
@@ -392,7 +471,7 @@ Subject: {subject}
 
 	elif category == "Non Lead":
 		# Non Lead email - create/find Non Lead
-		lead = find_or_create_lead(sender, sender_full_name, subject, "Non Lead", tags=tags)
+		lead = find_or_create_lead(sender, sender_full_name, subject, "Non Lead", tags=tags, organization=organization)
 
 		# Set reference fields
 		doc.reference_doctype = "Non Lead"
@@ -407,7 +486,7 @@ Subject: {subject}
 
 	elif category == "Query":
 		# Query email - create/find Query
-		lead = find_or_create_lead(sender, sender_full_name, subject, "Query", tags=tags)
+		lead = find_or_create_lead(sender, sender_full_name, subject, "Query", tags=tags, organization=organization)
 
 		# Set reference fields
 		doc.reference_doctype = "Query"
