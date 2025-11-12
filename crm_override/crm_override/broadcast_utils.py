@@ -599,18 +599,6 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
 
             frappe.logger().info(f"[Campaign] Created Communication: {comm.name} with status: {comm.status}, delivery_status: {comm.delivery_status}")
 
-            # ✅ STEP 4.5: Link Communication to tracker
-            if tracker:
-                frappe.db.set_value(
-                    "Lead Email Tracker",
-                    tracker.name,
-                    "communication",
-                    comm.name,
-                    update_modified=False
-                )
-                frappe.db.commit()
-                frappe.logger().info(f"[Campaign] Linked tracker {tracker.name} to communication {comm.name}")
-
             # ✅ STEP 4.6: Sync message_id if available
             if email_queue.message_id:
                 frappe.db.set_value(

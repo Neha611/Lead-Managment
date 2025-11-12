@@ -40,10 +40,9 @@ def execute():
         if "lead_type" not in existing_fields:
             fields_to_add.append({
                 "fieldname": "lead_type",
-                "fieldtype": "Select",
+                "fieldtype": "Data",
                 "label": "Lead Type",
                 "description": "Classification of lead type from AI validation",
-                "options": "Unclassified\nB2B\nB2C\nEnterprise\nSMB\nStartup\nIndividual",
                 "default": "Unclassified",
                 "in_standard_filter": 1,
                 "in_list_view": 1,
