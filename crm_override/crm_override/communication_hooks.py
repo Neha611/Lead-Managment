@@ -135,10 +135,10 @@ def api_find_or_create_lead(email, full_name=None, subject=None, doctype="CRM Le
     frappe.flags.ignore_csrf = True
     if tags and isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
-    lead = find_or_create_lead(email, full_name, subject, doctype, tags, organization, mobile_no, job_title, lead_name)
+    lead = find_or_create_lead(email, full_name, subject, doctype, tags=tags, organization=organization, mobile_no=mobile_no, job_title=job_title, lead_name=lead_name)
     return {"lead_name": lead.name, "doctype": doctype}
-
-def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None, organization=None, mobile_no=None, job_title=None, lead_name=None):
+# tags, organization, products, market, lead_type
+def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None, organization=None, products=None, market=None, lead_type=None, mobile_no=None, job_title=None, lead_name=None):
 	"""
 	Find existing lead by email or create new one with row-level locking to prevent duplicates.
 	Uses SELECT FOR UPDATE with retry logic for race conditions.
@@ -235,6 +235,21 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 			# Add organization if provided
 			if organization:
 				lead_data["organization"] = organization
+
+			if mobile_no:
+				lead_data["mobile_no"] = mobile_no
+
+			if job_title:	
+				lead_data["job_title"] = job_title
+
+			if lead_type:
+				lead_data["lead_type"] = lead_type
+
+			if products:
+				lead_data["products"] = products
+
+			if market:
+				lead_data["market"] = market
 
 			lead = frappe.get_doc(lead_data)
 
@@ -467,7 +482,10 @@ Subject: {subject}
 			"category": "Lead",
 			"tags": [],
 			"organization": None,
-			"reason": "Validation failed - defaulted to Lead"
+			"reason": "Validation failed - defaulted to Lead",
+			"product": None,
+			"market": None,
+			"lead_type": "Unclassified"
 		}
 
 	doc.flags.ai_validation_result = validation_result
@@ -477,7 +495,9 @@ Subject: {subject}
 	tags = validation_result.get("tags", [])
 	organization = validation_result.get("organization", None)
 	reason = validation_result.get("reason", "No reason provided")
-
+	products = validation_result.get("product", None)
+	market = validation_result.get("market", None)
+	lead_type = validation_result.get("lead_type", "Unclassified")
 	logger.info(f"📋 Validation Result:")
 	logger.info(f"   Category: {category}")
 	logger.info(f"   Tags: {tags}")
@@ -492,7 +512,7 @@ Subject: {subject}
 	# Find or create Lead based on category
 	if category == "Lead":
 		# Lead email - create/find CRM Lead
-		lead = find_or_create_lead(sender, sender_full_name, subject, "CRM Lead", tags=tags, organization=organization)
+		lead = find_or_create_lead(sender, sender_full_name, subject, "CRM Lead", tags=tags, organization=organization, products=products, market=market, lead_type=lead_type)
 
 		# Set reference fields
 		doc.reference_doctype = "CRM Lead"
@@ -505,7 +525,7 @@ Subject: {subject}
 
 	elif category == "Non Lead":
 		# Non Lead email - create/find Non Lead
-		lead = find_or_create_lead(sender, sender_full_name, subject, "Non Lead", tags=tags, organization=organization)
+		lead = find_or_create_lead(sender, sender_full_name, subject, "Non Lead", tags=tags, organization=organization, products=products, market=market, lead_type=lead_type)
 
 		# Set reference fields
 		doc.reference_doctype = "Non Lead"
@@ -520,7 +540,7 @@ Subject: {subject}
 
 	elif category == "Query":
 		# Query email - create/find Query
-		lead = find_or_create_lead(sender, sender_full_name, subject, "Query", tags=tags, organization=organization)
+		lead = find_or_create_lead(sender, sender_full_name, subject, "Query", tags=tags, organization=organization, products=products, market=market, lead_type=lead_type)
 
 		# Set reference fields
 		doc.reference_doctype = "Query"

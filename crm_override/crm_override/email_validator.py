@@ -157,8 +157,6 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 
 		# Call AI validation API
 		try:
-			print("API KEY FOR DIFY")
-			print(api_key)
 			# logger.warning("⚠️  Temporary debug log before API call", api_key)
 			response = requests.post(
 				"https://lab.tradyon.ai/v1/workflows/run",
@@ -201,6 +199,9 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 
 		if "reason" not in result:
 			result["reason"] = "No reason provided"
+		
+		if "lead_type" not in result:
+			result["lead_type"] = "Unclassified"
 
 		# Normalize category value
 		result["category"] = result["category"].strip()
@@ -214,7 +215,7 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 		logger.info(f"  Category: {result['category']}")
 		logger.info(f"  Tags: {result['tags']}")
 		logger.info(f"  Reason: {result['reason']}")
-
+		logger.info(f"  Lead Type: {result['lead_type']}")
 		return result
 
 	except Exception as e:
