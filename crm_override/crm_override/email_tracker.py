@@ -8,7 +8,7 @@ def update_tracker_on_email_send(email_queue_name):
         tracker = frappe.db.get_value(
             "Lead Email Tracker",
             {"email_queue_status": email_queue_name},
-            ["name", "communication"],
+            ["name", "communication", "email_campaign"],
             as_dict=True,
         )
 
@@ -70,7 +70,7 @@ def update_tracker_on_email_error(email_queue_name, error_message):
         tracker = frappe.db.get_value(
             "Lead Email Tracker",
             {"email_queue_status": email_queue_name},
-            ["name", "communication"],
+            ["name", "communication", "email_campaign"],
             as_dict=True,
         )
 
@@ -113,6 +113,23 @@ def update_tracker_on_email_error(email_queue_name, error_message):
         )
 
 
+def increment_campaign_counter(campaign_name, field_name):
+    """Helper function to increment Email Campaign counters."""
+    if campaign_name and campaign_name != "None":
+        try:
+            frappe.db.sql(f"""
+                UPDATE `tabEmail Campaign`
+                SET {field_name} = {field_name} + 1
+                WHERE name = %s
+            """, (campaign_name,))
+            print(f"[Campaign Counter] Incremented {field_name} for campaign {campaign_name}")
+        except Exception as e:
+            frappe.log_error(
+                title="Campaign Counter Update Error",
+                message=f"Campaign: {campaign_name}\nField: {field_name}\nError: {str(e)}"
+            )
+
+
 @frappe.whitelist(allow_guest=True, methods=['GET', 'POST'])
 def test_webhook():
     """
@@ -151,15 +168,15 @@ def sendgrid_webhook():
         # Get the events from SendGrid
         events = json.loads(frappe.request.data)
         
-        frappe.logger().info(f"[SendGrid Webhook] Received {len(events)} events")
+        print(f"[SendGrid Webhook] Received {len(events)} events")
         
         for event in events:
             event_type = event.get('event')  # 'open', 'click', 'delivered', 'bounce', etc.
             
-            frappe.logger().info(f"[SendGrid Webhook] Event type: {event_type}")
-            frappe.logger().info(f"[SendGrid Webhook] Full event data: {json.dumps(event, indent=2)}")
+            print(f"[SendGrid Webhook] Event type: {event_type}")
+            print(f"[SendGrid Webhook] Full event data: {json.dumps(event, indent=2)}")
             
-            # ✅ FIX: Get email_queue_name from custom args (unique_args)
+            # Get email_queue_name from custom args (unique_args)
             email_queue_name = None
             tracker_name = None
             
@@ -184,7 +201,7 @@ def sendgrid_webhook():
                         "name"
                     )
                     
-                    frappe.logger().info(f"[SendGrid Webhook] Found Email Queue by message_id: {email_queue_name}")
+                    print(f"[SendGrid Webhook] Found Email Queue by message_id: {email_queue_name}")
             
             # Another fallback: find by recipient email + timestamp
             if not email_queue_name and not tracker_name:
@@ -206,13 +223,13 @@ def sendgrid_webhook():
                     
                     if email_queue:
                         email_queue_name = email_queue[0].name
-                        frappe.logger().info(f"[SendGrid Webhook] Found Email Queue by recipient: {email_queue_name}")
+                        print(f"[SendGrid Webhook] Found Email Queue by recipient: {email_queue_name}")
             
             if not email_queue_name and not tracker_name:
-                frappe.logger().warning(f"[SendGrid Webhook] Could not find Email Queue or Tracker for event: {event}")
+                print(f"[SendGrid Webhook] Could not find Email Queue or Tracker for event: {event}")
                 continue
             
-            frappe.logger().info(f"[SendGrid Webhook] Processing {event_type} for Email Queue: {email_queue_name}")
+            print(f"[SendGrid Webhook] Processing {event_type} for Email Queue: {email_queue_name}")
             
             # Find the tracker
             tracker = None
@@ -222,83 +239,130 @@ def sendgrid_webhook():
                 tracker_data = frappe.db.get_value(
                     "Lead Email Tracker",
                     {"email_queue_status": email_queue_name},
-                    ["name", "status", "communication"],
+                    ["name", "status", "communication", "email_campaign"],
                     as_dict=True
                 )
                 if tracker_data:
                     tracker = frappe.get_doc("Lead Email Tracker", tracker_data.name)
             
             if not tracker:
-                frappe.logger().warning(f"[SendGrid Webhook] No tracker found for Email Queue: {email_queue_name}")
+                print(f"[SendGrid Webhook] No tracker found for Email Queue: {email_queue_name}")
                 continue
             
-            # ✅ Update based on event type
+            # Update based on event type
             if event_type == 'open':
-                if tracker.status != "Opened":
-                    # Update tracker
+                # Set opened flag regardless
+                tracker.opened = 1
+                tracker.opened_at = now_datetime()
+                
+                # Only update status if currently Sent or Delivered
+                # Don't override Clicked status
+                if tracker.status in ["Sent", "Delivered", "Queued"]:
                     tracker.status = "Opened"
-                    tracker.opened_at = now_datetime()
-                    tracker.save(ignore_permissions=True)
+                
+                tracker.save(ignore_permissions=True)
+                
+                # Increment campaign counter
+                increment_campaign_counter(tracker.email_campaign, "opened")
                     
-                    # Update Communication
-                    if tracker.communication:
-                        comm = frappe.get_doc("Communication", tracker.communication)
-                        comm.db_set("status", "Opened", update_modified=False)
-                        comm.db_set("delivery_status", "Opened", update_modified=False)
-                        
-                        # Notify UI
-                        comm.notify_change("update")
+                # Update Communication only if status changed to Opened
+                if tracker.communication and tracker.status == "Opened":
+                    comm = frappe.get_doc("Communication", tracker.communication)
+                    comm.db_set("status", "Opened", update_modified=False)
+                    comm.db_set("delivery_status", "Opened", update_modified=False)
+                    
+                    # Notify UI
+                    comm.notify_change("update")
+                    frappe.publish_realtime(
+                        "list_update",
+                        {
+                            "doctype": "Communication",
+                            "name": tracker.communication,
+                            "delivery_status": "Opened"
+                        },
+                        after_commit=True
+                    )
+                    
+                    # Update timeline
+                    if comm.reference_doctype and comm.reference_name:
                         frappe.publish_realtime(
-                            "list_update",
+                            "docinfo_update",
                             {
-                                "doctype": "Communication",
-                                "name": tracker.communication,
-                                "delivery_status": "Opened"
+                                "doc": comm.as_dict(),
+                                "key": "communications",
+                                "action": "update"
                             },
+                            doctype=comm.reference_doctype,
+                            docname=comm.reference_name,
                             after_commit=True
                         )
-                        
-                        # Update timeline
-                        if comm.reference_doctype and comm.reference_name:
-                            frappe.publish_realtime(
-                                "docinfo_update",
-                                {
-                                    "doc": comm.as_dict(),
-                                    "key": "communications",
-                                    "action": "update"
-                                },
-                                doctype=comm.reference_doctype,
-                                docname=comm.reference_name,
-                                after_commit=True
-                            )
+                
+                print(f"[SendGrid Webhook] Updated tracker {tracker.name} -> Opened")
+            
+            elif event_type == 'click':
+                # Update clicked flag
+                tracker.clicked = 1
+                if tracker.status not in ["Clicked", "Opened"]:
+                    tracker.status = "Clicked"
+                tracker.save(ignore_permissions=True)
+                
+                # Increment campaign counter
+                increment_campaign_counter(tracker.email_campaign, "clicked")
+                
+                if tracker.communication:
+                    comm = frappe.get_doc("Communication", tracker.communication)
+                    comm.db_set("status", "Clicked", update_modified=False)
+                    comm.db_set("delivery_status", "Clicked", update_modified=False)
+                    comm.notify_change("update")
                     
-                    frappe.logger().info(f"[SendGrid Webhook] Updated tracker {tracker.name} -> Opened")
+                    frappe.publish_realtime(
+                        "list_update",
+                        {
+                            "doctype": "Communication",
+                            "name": tracker.communication,
+                            "delivery_status": "Clicked"
+                        },
+                        after_commit=True
+                    )
+                
+                print(f"[SendGrid Webhook] Updated tracker {tracker.name} -> Clicked")
             
             elif event_type == 'delivered':
+                # Always set delivered flag
+                tracker.delivered = 1
+                tracker.last_sent_on = now_datetime()
+                
+                # Update status only if still Queued (not already Opened/Clicked)
                 if tracker.status == "Queued":
                     tracker.status = "Sent"
-                    tracker.last_sent_on = now_datetime()
-                    tracker.save(ignore_permissions=True)
+                
+                tracker.save(ignore_permissions=True)
+                
+                # Increment campaign counter
+                increment_campaign_counter(tracker.email_campaign, "delivered")
+                
+                # Update Communication only if status changed
+                if tracker.communication and tracker.status == "Sent":
+                    comm = frappe.get_doc("Communication", tracker.communication)
+                    comm.db_set("status", "Sent", update_modified=False)
+                    comm.db_set("delivery_status", "Sent", update_modified=False)
+                    comm.notify_change("update")
                     
-                    if tracker.communication:
-                        comm = frappe.get_doc("Communication", tracker.communication)
-                        comm.db_set("status", "Sent", update_modified=False)
-                        comm.db_set("delivery_status", "Sent", update_modified=False)
-                        comm.notify_change("update")
-                        
-                        frappe.publish_realtime(
-                            "list_update",
-                            {
-                                "doctype": "Communication",
-                                "name": tracker.communication,
-                                "delivery_status": "Sent"
-                            },
-                            after_commit=True
-                        )
+                    frappe.publish_realtime(
+                        "list_update",
+                        {
+                            "doctype": "Communication",
+                            "name": tracker.communication,
+                            "delivery_status": "Sent"
+                        },
+                        after_commit=True
+                    )
+                
+                print(f"[SendGrid Webhook] Updated tracker {tracker.name} -> Delivered")
             
-            elif event_type in ['bounce', 'dropped', 'deferred']:
+            elif event_type == 'bounce':
                 error_msg = event.get('reason', event.get('type', 'Unknown error'))
-                tracker.status = "Failed"
+                tracker.status = "Bounced"
                 tracker.error_message = error_msg
                 tracker.save(ignore_permissions=True)
                 
@@ -317,6 +381,48 @@ def sendgrid_webhook():
                         },
                         after_commit=True
                     )
+                
+                print(f"[SendGrid Webhook] Updated tracker {tracker.name} -> Bounced")
+            
+            elif event_type == 'dropped':
+                error_msg = event.get('reason', event.get('type', 'Unknown error'))
+                tracker.status = "Dropped"
+                tracker.error_message = error_msg
+                tracker.dropped = 1  # Set dropped flag
+                tracker.save(ignore_permissions=True)
+                
+                # Increment campaign counter
+                increment_campaign_counter(tracker.email_campaign, "dropped")
+                
+                if tracker.communication:
+                    comm = frappe.get_doc("Communication", tracker.communication)
+                    comm.db_set("status", "Failed", update_modified=False)
+                    comm.db_set("delivery_status", "Failed", update_modified=False)
+                    comm.notify_change("update")
+                    
+                    frappe.publish_realtime(
+                        "list_update",
+                        {
+                            "doctype": "Communication",
+                            "name": tracker.communication,
+                            "delivery_status": "Failed"
+                        },
+                        after_commit=True
+                    )
+                
+                print(f"[SendGrid Webhook] Updated tracker {tracker.name} -> Dropped")
+            
+            elif event_type == 'deferred':
+                error_msg = event.get('reason', event.get('type', 'Deferred'))
+                tracker.status = "Deferred"
+                tracker.error_message = error_msg
+                tracker.deffered = 1  # Set deferred flag (note: typo in schema 'deffered')
+                tracker.save(ignore_permissions=True)
+                
+                # Increment campaign counter
+                increment_campaign_counter(tracker.email_campaign, "deffered")
+                
+                print(f"[SendGrid Webhook] Updated tracker {tracker.name} -> Deferred")
         
         frappe.db.commit()
         
@@ -331,7 +437,6 @@ def sendgrid_webhook():
         )
         frappe.response.http_status_code = 500
         return {"status": "error", "message": str(e)}
-    
 
 
 @frappe.whitelist()
@@ -373,7 +478,7 @@ def sync_opens_from_sendgrid():
                 tracker = frappe.db.get_value(
                     "Lead Email Tracker",
                     {"email_queue_status": eq.name},
-                    ["name", "status", "communication"],
+                    ["name", "status", "communication", "email_campaign"],
                     as_dict=True
                 )
                 
@@ -384,6 +489,9 @@ def sync_opens_from_sendgrid():
                         SET status=%s, opened_at=%s
                         WHERE name=%s
                     """, ("Opened", now_datetime(), tracker.name))
+                    
+                    # Increment campaign counter
+                    increment_campaign_counter(tracker.email_campaign, "opened")
                     
                     if tracker.communication:
                         comm = frappe.get_doc("Communication", tracker.communication)

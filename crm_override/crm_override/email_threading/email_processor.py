@@ -1,70 +1,176 @@
 """
-Central Email Processing Pipeline
-Handles all incoming emails regardless of source (IMAP or SendGrid)
+Enhanced Email Processor with Explicit Thread Mapping - FIXED VERSION
+Properly uses Email Thread Mapping table for lookups
 """
 
 import frappe
-from frappe.utils import now_datetime, get_datetime
+from frappe.utils import now_datetime
+from frappe.utils.data import get_datetime
 from typing import Dict, Optional
-import uuid
 from frappe.model.document import Document
+
+from crm_override.crm_override.doctype.email_thread_mapping.email_thread_mapping import (
+    store_message_thread_mapping,
+    get_thread_id_from_message_id,
+)
 
 
 def process_incoming_email(normalized_email: Dict) -> Optional[str]:
     """
-    Central function to process all incoming emails.
-    Handles threading, reply linking, and Communication creation.
-    
-    Args:
-        normalized_email: Standardized email dict from EmailStrategy
-        
-    Returns:
-        Communication name if successful, None otherwise
+    Process incoming email and create Communication with proper threading
     """
     try:
-        frappe.logger().info(f"[Email Processor] Processing email from: {normalized_email.get('from')}")
+        # Get clean message IDs (WITH angle brackets per RFC)
+        message_id = _clean_message_id(normalized_email.get('message_id', ''))
+        in_reply_to_header = _clean_message_id(normalized_email.get('in_reply_to', ''))
         
-        # Step 1: Extract or generate thread_id
-        thread_id = _resolve_thread_id(normalized_email)
+        print(
+            f"[Email Processor] Processing email\n"
+            f"  From: {normalized_email.get('from')}\n"
+            f"  Subject: {normalized_email.get('subject')}\n"
+            f"  Message-ID: {message_id}\n"
+            f"  In-Reply-To Header: {in_reply_to_header}"
+        )
         
-        if not thread_id:
-            frappe.logger().warning("[Email Processor] Could not resolve thread_id, creating new thread")
-            thread_id = _generate_thread_id()
+        # Check if already processed
+        if message_id:
+            existing = frappe.db.exists("Communication", {"message_id": message_id})
+            if existing:
+                print(f"[Email Processor] Email already processed: {existing}")
+                return existing
         
-        frappe.logger().info(f"[Email Processor] Thread ID: {thread_id}")
+        # FIXED: Find parent Communication using mapping table FIRST
+        parent_comm = None
+        parent_comm_name = None
         
-        # Step 2: Find parent Communication (if reply)
-        parent_comm = _find_parent_communication(normalized_email, thread_id)
+        if in_reply_to_header:
+            # Look up the Communication that has this Message-ID
+            parent_comm_name = frappe.db.get_value(
+                "Email Thread Mapping",
+                {"message_id": in_reply_to_header},
+                "communication"
+            )
+            
+            if parent_comm_name:
+                # Now get the full Communication details
+                parent_comm = frappe.db.get_value(
+                    "Communication",
+                    parent_comm_name,
+                    ["name", "reference_doctype", "reference_name", "thread_id", "message_id"],
+                    as_dict=True
+                )
+                
+                if parent_comm:
+                    print(
+                        f"[Email Processor] ✅ Found parent via mapping: {parent_comm_name}\n"
+                        f"  Parent Message-ID: {parent_comm.message_id}\n"
+                        f"  Parent Thread-ID: {parent_comm.thread_id}"
+                    )
+                else:
+                    print(f"[Email Processor] ⚠️ Mapping found but Communication {parent_comm_name} not found")
         
-        # Step 3: Determine reference document (CRM Lead, Deal, etc.)
+        # FALLBACK: Try to find parent by subject line (for emails with/without In-Reply-To)
+        # This handles campaign emails that may not have stored mappings or In-Reply-To headers
+        if not parent_comm_name:
+            reply_subject = normalized_email.get('subject', '').strip()
+            original_subject = None
+            
+            # Extract base subject from "Re:" or use as-is
+            if reply_subject.lower().startswith('re:'):
+                # Extract original subject
+                original_subject = reply_subject[3:].strip()
+            else:
+                # Use full subject as fallback (may or may not have "Re:" depending on client)
+                original_subject = reply_subject
+            
+            if original_subject:
+                print(f"[Email Processor] 🔍 Fallback: Looking for original subject: '{original_subject}'")
+                
+                # STEP 1: Try exact match first (most precise)
+                fallback_comms = frappe.db.get_all(
+                    "Communication",
+                    filters={
+                        "subject": original_subject,
+                        "communication_type": "Communication"
+                    },
+                    fields=["name", "reference_doctype", "reference_name", "thread_id", "message_id", "creation", "sent_or_received"],
+                    order_by="sent_or_received desc, creation desc",  # Prefer outbound/sent emails
+                    limit=5
+                )
+                
+                # STEP 2: If no exact match, try matching on the "clean" subject
+                # (in case recipient's email client added extra markers)
+                if not fallback_comms and reply_subject.lower().startswith('re:'):
+                    clean_subject = reply_subject[3:].strip()
+                    fallback_comms = frappe.db.get_all(
+                        "Communication",
+                        filters={
+                            "subject": clean_subject,
+                            "communication_type": "Communication",
+                            "sent_or_received": "Sent"  # Campaign emails we sent
+                        },
+                        fields=["name", "reference_doctype", "reference_name", "thread_id", "message_id", "creation", "sent_or_received"],
+                        order_by="creation desc",
+                        limit=5
+                    )
+                
+                if fallback_comms:
+                    parent_comm = fallback_comms[0]
+                    parent_comm_name = parent_comm["name"]
+                    print(
+                        f"[Email Processor] ✅ Found parent via subject fallback: {parent_comm_name}\n"
+                        f"  Subject: {original_subject}\n"
+                        f"  Thread-ID: {parent_comm.get('thread_id')}\n"
+                        f"  Reference: {parent_comm.get('reference_doctype')}/{parent_comm.get('reference_name')}"
+                    )
+                else:
+                    print(
+                        f"[Email Processor] ⚠️ Fallback failed - no parent found by subject\n"
+                        f"  Looking for: {original_subject}"
+                    )
+        
+        # Resolve thread_id using parent or References header or generate new
+        thread_id = _resolve_thread_id(
+            in_reply_to_header, 
+            normalized_email.get('references', []),
+            parent_comm
+        )
+        
+        # Determine reference document (inherit from parent or find new)
         reference_doctype, reference_name = _resolve_reference_document(
             normalized_email, parent_comm
         )
         
-        # Step 4: Create Communication entry
+        # Create Communication
         comm = _create_communication(
             normalized_email=normalized_email,
             thread_id=thread_id,
-            parent_comm=parent_comm,
+            parent_comm_name=parent_comm_name,
             reference_doctype=reference_doctype,
-            reference_name=reference_name
+            reference_name=reference_name,
+            message_id=message_id
         )
         
         if not comm:
             frappe.logger().error("[Email Processor] Failed to create Communication")
             return None
         
-        # Step 5: Handle attachments
+        # Store mapping immediately (will be part of the same transaction)
+        if message_id and thread_id:
+            store_message_thread_mapping(message_id, thread_id, comm.name)
+            print(f"[Email Processor] 📝 Queued mapping: {message_id} -> {thread_id} -> {comm.name}")
+        
+        # Handle attachments
         _attach_files(comm, normalized_email.get('attachments', []))
         
-        # Step 6: Update Lead Email Tracker if applicable
-        _update_tracker_on_reply(comm, normalized_email)
-        
-        # Step 7: Trigger UI updates
-        _trigger_ui_updates(comm)
-        
+        # IMPORTANT: Commit ONCE at the end to save everything together
         frappe.db.commit()
-        frappe.logger().info(f"[Email Processor] Successfully processed email: {comm.name}")
+        
+        print(
+            f"[Email Processor] ✅ Successfully processed | "
+            f"Communication: {comm.name} | Thread: {thread_id} | "
+            f"Parent: {parent_comm_name or 'None'}"
+        )
         
         return comm.name
         
@@ -73,113 +179,121 @@ def process_incoming_email(normalized_email: Dict) -> Optional[str]:
             title="Email Processing Failed",
             message=f"From: {normalized_email.get('from')}\n"
                    f"Subject: {normalized_email.get('subject')}\n"
-                   f"Error: {str(e)}\n"
-                   f"{frappe.get_traceback()}"
+                   f"Error: {str(e)}\n{frappe.get_traceback()}"
         )
         return None
 
 
-def _resolve_thread_id(normalized_email: Dict) -> Optional[str]:
+def _clean_message_id(msg_id: str) -> str:
     """
-    Extract thread_id from email headers or find from parent emails
-    
-    Priority:
-    1. X-Frappe-Thread-ID header
-    2. Find from in_reply_to Communication
-    3. Find from references chain
+    Clean and standardize Message-ID format
+    Always returns format: <id@domain> or empty string
     """
-    # Check custom header first
-    thread_id = normalized_email.get('thread_id')
-    if thread_id:
-        return thread_id
+    if not msg_id:
+        return ''
     
-    # Try to find from in_reply_to
-    in_reply_to = normalized_email.get('in_reply_to')
-    if in_reply_to:
-        parent = frappe.db.get_value(
-            "Communication",
-            {"message_id": in_reply_to},
-            ["name", "thread_id"],
-            as_dict=True
+    msg_id = msg_id.strip()
+    
+    # Add angle brackets if missing
+    if msg_id and not msg_id.startswith('<'):
+        msg_id = f'<{msg_id}>'
+    if msg_id and not msg_id.endswith('>'):
+        msg_id = f'{msg_id}>'
+    
+    return msg_id
+
+
+def _resolve_thread_id(
+    in_reply_to_header: str, 
+    references: list,
+    parent_comm: Optional[frappe._dict]
+) -> str:
+    """
+    Resolve thread_id using priority order:
+    1. Use parent Communication's thread_id (if found) - MOST RELIABLE
+    2. Check In-Reply-To header via mapping table (redundant but safe)
+    3. Check References chain via mapping table (fallback)
+    4. Generate new thread_id
+    
+    Args:
+        in_reply_to_header: Message-ID from email In-Reply-To header
+        references: List of Message-IDs from References header (for fallback)
+        parent_comm: Parent Communication doc (if found)
+    """
+    
+    # Method 1: Use parent Communication's thread_id directly (MOST RELIABLE)
+    if parent_comm and parent_comm.get('thread_id'):
+        print(
+            f"[Email Processor] ✅ Using thread_id from parent Communication: {parent_comm.thread_id}"
         )
-        if parent and parent.get('thread_id'):
-            return parent.get('thread_id')
+        return parent_comm.thread_id
     
-    # Try references chain
-    references = normalized_email.get('references', [])
-    if references:
-        # Check most recent reference first
-        for ref in reversed(references):
-            parent = frappe.db.get_value(
-                "Communication",
-                {"message_id": ref},
-                ["name", "thread_id"],
-                as_dict=True
+    # Method 2: Check In-Reply-To header via mapping table (fallback if parent lookup failed)
+    if in_reply_to_header:
+        thread_id = get_thread_id_from_message_id(in_reply_to_header)
+        if thread_id:
+            print(
+                f"[Email Processor] ✅ Found thread via In-Reply-To mapping: {thread_id}"
             )
-            if parent and parent.get('thread_id'):
-                return parent.get('thread_id')
+            return thread_id
+        else:
+            frappe.logger().warning(
+                f"[Email Processor] ⚠️ In-Reply-To header present but no mapping found: {in_reply_to_header}"
+            )
     
-    return None
-
-
-def _generate_thread_id() -> str:
-    """Generate a unique thread identifier"""
-    return f"thread-{uuid.uuid4().hex[:16]}"
-
-
-def _find_parent_communication(normalized_email: Dict, thread_id: str) -> Optional[frappe._dict]:
-    """
-    Find parent Communication for reply threading
-    """
-    in_reply_to = normalized_email.get('in_reply_to')
+    # Method 3: Check References chain (fallback for complex threading)
+    # The References header contains all Message-IDs in the conversation
+    if references and isinstance(references, list):
+        print(f"[Email Processor] Checking {len(references)} references...")
+        
+        # Check in reverse order (most recent first)
+        for ref_id in reversed(references):
+            ref_id_clean = _clean_message_id(ref_id)
+            if not ref_id_clean:
+                continue
+            
+            thread_id = get_thread_id_from_message_id(ref_id_clean)
+            if thread_id:
+                print(
+                    f"[Email Processor] ✅ Found thread via References mapping: {thread_id}"
+                )
+                return thread_id
     
-    # First try exact message_id match
-    if in_reply_to:
-        parent = frappe.db.get_value(
-            "Communication",
-            {"message_id": in_reply_to},
-            ["name", "reference_doctype", "reference_name", "thread_id"],
-            as_dict=True
-        )
-        if parent:
-            frappe.logger().info(f"[Email Processor] Found parent by message_id: {parent.name}")
-            return parent
+    # Method 4: Generate new thread_id
+    from crm_override.crm_override.email_threading.outbound_email_threading import generate_thread_id
+    new_thread_id = generate_thread_id()
     
-    # Try finding by thread_id (most recent in thread)
-    if thread_id:
-        parents = frappe.get_all(
-            "Communication",
-            filters={"thread_id": thread_id},
-            fields=["name", "reference_doctype", "reference_name", "thread_id", "creation"],
-            order_by="creation desc",
-            limit=1
-        )
-        if parents:
-            frappe.logger().info(f"[Email Processor] Found parent by thread_id: {parents[0].name}")
-            return parents[0]
+    print(
+        f"[Email Processor] ✅ New conversation - generated: {new_thread_id}"
+    )
     
-    return None
+    return new_thread_id
 
 
-def _resolve_reference_document(normalized_email: Dict, parent_comm: Optional[frappe._dict]) -> tuple:
+def _resolve_reference_document(
+    normalized_email: Dict, 
+    parent_comm: Optional[frappe._dict]
+) -> tuple:
     """
     Determine which CRM document this email belongs to
-    
-    Returns: (reference_doctype, reference_name)
     """
-    # If this is a reply, inherit from parent
+    # Inherit from parent if this is a reply
     if parent_comm:
-        return (parent_comm.get('reference_doctype'), parent_comm.get('reference_name'))
+        ref_doctype = parent_comm.get('reference_doctype')
+        ref_name = parent_comm.get('reference_name')
+        if ref_doctype and ref_name:
+            print(
+                f"[Email Processor] Using reference from parent: {ref_doctype}/{ref_name}"
+            )
+            return (ref_doctype, ref_name)
     
-    # Try to find CRM Lead by email address
+    # Try to find CRM Lead by email
     sender_email = normalized_email.get('from')
     if sender_email:
         lead = frappe.db.get_value("CRM Lead", {"email": sender_email}, "name")
         if lead:
-            frappe.logger().info(f"[Email Processor] Found CRM Lead: {lead}")
+            print(f"[Email Processor] Found CRM Lead: {lead}")
             return ("CRM Lead", lead)
-    
-    # Could extend to search other doctypes (Contact, Deal, etc.)
     
     frappe.logger().warning("[Email Processor] No reference document found")
     return (None, None)
@@ -188,16 +302,32 @@ def _resolve_reference_document(normalized_email: Dict, parent_comm: Optional[fr
 def _create_communication(
     normalized_email: Dict,
     thread_id: str,
-    parent_comm: Optional[frappe._dict],
+    parent_comm_name: Optional[str],
     reference_doctype: Optional[str],
-    reference_name: Optional[str]
+    reference_name: Optional[str],
+    message_id: str
 ) -> Optional[Document]:
     """
     Create Communication document from normalized email
+    
+    IMPORTANT: parent_comm_name is the Communication.name (like "COMM-2024-00001")
+               NOT the Message-ID from the email header
     """
     try:
-        # Determine content (prefer HTML, fallback to text)
         content = normalized_email.get('body_html') or normalized_email.get('body_text') or ''
+        raw_date = normalized_email.get('date') or now_datetime()
+        try:
+            # If it's a string, parse it
+            comm_date = get_datetime(raw_date)
+        except Exception:
+            comm_date = now_datetime()
+
+        # Strip timezone if present
+        if getattr(comm_date, "tzinfo", None) is not None:
+            comm_date = comm_date.replace(tzinfo=None)
+
+        # Force into MySQL-compatible format
+        comm_date_str = comm_date.strftime("%Y-%m-%d %H:%M:%S")
         
         comm_data = {
             "doctype": "Communication",
@@ -211,27 +341,27 @@ def _create_communication(
             "content": content,
             "text_content": normalized_email.get('body_text', ''),
             "status": "Open",
-            "delivery_status": "Received",
-            "message_id": normalized_email.get('message_id'),
-            "in_reply_to": normalized_email.get('in_reply_to'),
+            "delivery_status": "Sent",
+            "message_id": message_id or None,
+            "in_reply_to": parent_comm_name,
             "thread_id": thread_id,
             "email_status": "Open",
-            "received_at": normalized_email.get('date', now_datetime()),
+            "communication_date": comm_date_str
         }
         
-        # Add reference if available
+        # Add reference document
         if reference_doctype and reference_name:
             comm_data["reference_doctype"] = reference_doctype
             comm_data["reference_name"] = reference_name
         
-        # Create Communication
         comm = frappe.get_doc(comm_data)
         comm.insert(ignore_permissions=True)
         
-        frappe.logger().info(
-            f"[Email Processor] Created Communication: {comm.name} | "
-            f"Thread: {thread_id} | "
-            f"Parent: {parent_comm.name if parent_comm else 'None'}"
+        print(
+            f"[Email Processor] Created Communication: {comm.name}\n"
+            f"  Thread: {thread_id}\n"
+            f"  Message-ID: {message_id}\n"
+            f"  In-Reply-To (Communication): {parent_comm_name or 'None'}"
         )
         
         return comm
@@ -239,15 +369,14 @@ def _create_communication(
     except Exception as e:
         frappe.log_error(
             title="Communication Creation Failed",
-            message=f"Error: {str(e)}\n{frappe.get_traceback()}"
+            message=f"Subject: {normalized_email.get('subject')}\n"
+                   f"Error: {str(e)}\n{frappe.get_traceback()}"
         )
         return None
 
 
 def _attach_files(comm: Document, attachments: list):
-    """
-    Attach files to Communication document
-    """
+    """Attach files to Communication"""
     if not attachments:
         return
     
@@ -264,8 +393,6 @@ def _attach_files(comm: Document, attachments: list):
             })
             file_doc.save(ignore_permissions=True)
             
-            frappe.logger().info(f"[Email Processor] Attached file: {attachment.get('filename')}")
-            
         except Exception as e:
             frappe.log_error(
                 title="File Attachment Failed",
@@ -273,126 +400,3 @@ def _attach_files(comm: Document, attachments: list):
                        f"File: {attachment.get('filename')}\n"
                        f"Error: {str(e)}"
             )
-
-
-def _update_tracker_on_reply(comm: Document, normalized_email: Dict):
-    """
-    Update Lead Email Tracker when lead replies to campaign email
-    """
-    try:
-        # Only process if this is linked to a CRM Lead
-        if comm.reference_doctype != "CRM Lead":
-            return
-        
-        lead_name = comm.reference_name
-        
-        # Find tracker for this lead in the same thread
-        tracker = frappe.db.get_value(
-            "Lead Email Tracker",
-            {
-                "lead": lead_name,
-                "communication": ["!=", ""]  # Must have sent email
-            },
-            ["name", "communication"],
-            as_dict=True
-        )
-        
-        if not tracker:
-            frappe.logger().info(f"[Email Processor] No tracker found for lead {lead_name}")
-            return
-        
-        # Check if original email is in same thread
-        original_comm = frappe.get_value("Communication", tracker.communication, "thread_id")
-        
-        if original_comm == comm.thread_id:
-            # This is a reply to our campaign email!
-            frappe.db.set_value(
-                "Lead Email Tracker",
-                tracker.name,
-                {
-                    "status": "Replied",
-                    "replied_on": now_datetime()
-                },
-                update_modified=False
-            )
-            
-            frappe.logger().info(f"[Email Processor] Updated tracker {tracker.name} -> Replied")
-            
-    except Exception as e:
-        frappe.log_error(
-            title="Tracker Update Failed",
-            message=f"Communication: {comm.name}\n"
-                   f"Error: {str(e)}"
-        )
-
-
-def _trigger_ui_updates(comm: Document):
-    """
-    Publish realtime updates for UI refresh
-    """
-    try:
-        # Notify Communication list
-        frappe.publish_realtime(
-            "list_update",
-            {
-                "doctype": "Communication",
-                "name": comm.name
-            },
-            after_commit=True
-        )
-        
-        # Update timeline on reference document
-        if comm.reference_doctype and comm.reference_name:
-            frappe.publish_realtime(
-                "docinfo_update",
-                {
-                    "doc": comm.as_dict(),
-                    "key": "communications",
-                    "action": "add"
-                },
-                doctype=comm.reference_doctype,
-                docname=comm.reference_name,
-                after_commit=True
-            )
-            
-            frappe.logger().info(f"[Email Processor] Published UI updates for {comm.name}")
-            
-    except Exception as e:
-        frappe.logger().error(f"[Email Processor] UI update failed: {str(e)}")
-
-
-@frappe.whitelist(allow_guest=True)
-def handle_sendgrid_webhook():
-    """
-    Webhook endpoint for SendGrid Inbound Parse
-    URL: /api/method/crm_override.crm_override.email_processor.handle_sendgrid_webhook
-    """
-    try:
-        # Get POST data from SendGrid
-        from frappe import request
-        raw_data = request.form.to_dict()
-        
-        frappe.logger().info("[SendGrid Webhook] Received email")
-        
-        # Use SendGrid strategy
-        from crm_override.crm_override.email_threading.email_strategy import SendGridStrategy
-        strategy = SendGridStrategy()
-        normalized_email = strategy.normalize_email(raw_data)
-        
-        if not normalized_email:
-            return {"status": "error", "message": "Failed to normalize email"}
-        
-        # Process email
-        comm_name = process_incoming_email(normalized_email)
-        
-        if comm_name:
-            return {"status": "success", "communication": comm_name}
-        else:
-            return {"status": "error", "message": "Failed to process email"}
-            
-    except Exception as e:
-        frappe.log_error(
-            title="SendGrid Webhook Error",
-            message=f"Error: {str(e)}\n{frappe.get_traceback()}"
-        )
-        return {"status": "error", "message": str(e)}

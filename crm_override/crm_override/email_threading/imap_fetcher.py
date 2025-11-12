@@ -1,15 +1,12 @@
 """
-IMAP Email Fetcher for Development Environments
+IMAP Email Fetcher
 Scheduled task that fetches unseen emails from IMAP server
 """
 
 import frappe
 from frappe.utils import now_datetime
 import imaplib
-import email
-from email.parser import BytesParser
-from email import policy
-from crm_override.crm_override.email_threading.email_strategy import IMAPStrategy, EmailStrategyFactory
+from crm_override.crm_override.email_threading.email_utils import normalize_imap_email
 from crm_override.crm_override.email_threading.email_processor import process_incoming_email
 
 
@@ -17,26 +14,19 @@ def fetch_imap_emails():
     """
     Scheduled function to fetch emails from IMAP server.
     Should be configured in hooks.py as a scheduled job.
-    
-    Only runs when email_inbound_source = "imap" in site_config.json
     """
-    # Check if IMAP mode is enabled
-    if not EmailStrategyFactory.is_imap_mode():
-        frappe.logger().info("[IMAP Fetcher] Skipping - not in IMAP mode")
-        return
-    
     try:
-        frappe.logger().info("[IMAP Fetcher] Starting email fetch")
+        print("[IMAP Fetcher] Starting email fetch")
         
-        # Get IMAP configuration from site_config.json
-        imap_config = _get_imap_config()
+        # Get IMAP configuration
+        imap_config = get_imap_config()
         
         if not imap_config:
-            frappe.logger().error("[IMAP Fetcher] IMAP configuration not found in site_config.json")
+            frappe.logger().error("[IMAP Fetcher] IMAP configuration not found")
             return
         
         # Connect to IMAP server
-        mail = _connect_imap(imap_config)
+        mail = connect_imap(imap_config)
         
         if not mail:
             return
@@ -55,7 +45,7 @@ def fetch_imap_emails():
         email_ids = message_ids[0].split()
         processed_count = 0
         
-        frappe.logger().info(f"[IMAP Fetcher] Found {len(email_ids)} unseen emails")
+        print(f"[IMAP Fetcher] Found {len(email_ids)} unseen emails")
         
         for email_id in email_ids:
             try:
@@ -68,9 +58,8 @@ def fetch_imap_emails():
                 # Parse email
                 raw_email = msg_data[0][1]
                 
-                # Use IMAP strategy to normalize
-                strategy = IMAPStrategy()
-                normalized_email = strategy.normalize_email(raw_email)
+                # Normalize email
+                normalized_email = normalize_imap_email(raw_email)
                 
                 if not normalized_email:
                     frappe.logger().error(f"[IMAP Fetcher] Failed to normalize email {email_id}")
@@ -81,7 +70,7 @@ def fetch_imap_emails():
                 
                 if comm_name:
                     processed_count += 1
-                    frappe.logger().info(f"[IMAP Fetcher] Processed email {email_id} -> {comm_name}")
+                    print(f"[IMAP Fetcher] Processed email {email_id} -> {comm_name}")
                 else:
                     frappe.logger().error(f"[IMAP Fetcher] Failed to process email {email_id}")
                 
@@ -96,7 +85,7 @@ def fetch_imap_emails():
         mail.close()
         mail.logout()
         
-        frappe.logger().info(f"[IMAP Fetcher] Completed - processed {processed_count}/{len(email_ids)} emails")
+        print(f"[IMAP Fetcher] Completed - processed {processed_count}/{len(email_ids)} emails")
         
     except Exception as e:
         frappe.log_error(
@@ -105,10 +94,9 @@ def fetch_imap_emails():
         )
 
 
-def _get_imap_config() -> dict:
+def get_imap_config() -> dict:
     """
-    Get IMAP configuration from Email Account doctype.
-    Compatible with your Frappe field schema.
+    Get IMAP configuration from Email Account doctype
     """
     try:
         # Fetch first account with incoming + IMAP enabled
@@ -137,7 +125,7 @@ def _get_imap_config() -> dict:
             "account_name": account.name
         }
 
-        frappe.logger().info(f"[IMAP Fetcher] Loaded IMAP config from Email Account: {account.name}")
+        print(f"[IMAP Fetcher] Loaded IMAP config from Email Account: {account.name}")
         return config
 
     except Exception as e:
@@ -148,9 +136,7 @@ def _get_imap_config() -> dict:
         return None
 
 
-
-
-def _connect_imap(config: dict):
+def connect_imap(config: dict):
     """
     Connect to IMAP server using configuration
     """
@@ -161,7 +147,7 @@ def _connect_imap(config: dict):
         password = config.get('password')
         use_ssl = config.get('use_ssl', True)
         
-        frappe.logger().info(f"[IMAP Fetcher] Connecting to {host}:{port}")
+        print(f"[IMAP Fetcher] Connecting to {host}:{port}")
         
         # Connect
         if use_ssl:
@@ -172,7 +158,7 @@ def _connect_imap(config: dict):
         # Login
         mail.login(email_addr, password)
         
-        frappe.logger().info("[IMAP Fetcher] Successfully connected and authenticated")
+        print("[IMAP Fetcher] Successfully connected and authenticated")
         
         return mail
         
@@ -192,7 +178,7 @@ def test_imap_connection():
     Test IMAP connection - useful for debugging
     """
     try:
-        config = _get_imap_config()
+        config = get_imap_config()
         
         if not config:
             return {
@@ -200,7 +186,7 @@ def test_imap_connection():
                 "message": "No valid IMAP Email Account found with incoming enabled"
             }
         
-        mail = _connect_imap(config)
+        mail = connect_imap(config)
         
         if not mail:
             return {
@@ -230,32 +216,6 @@ def test_imap_connection():
             "host": config.get('host'),
             "email": config.get('email'),
             "inbox_messages": email_count
-        }
-        
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Error: {str(e)}"
-        }
-
-
-@frappe.whitelist()
-def manual_imap_fetch():
-    """
-    Manually trigger IMAP email fetch - useful for testing
-    """
-    try:
-        if not EmailStrategyFactory.is_imap_mode():
-            return {
-                "success": False,
-                "message": "Not in IMAP mode. Set email_inbound_source='imap' in site_config.json"
-            }
-        
-        fetch_imap_emails()
-        
-        return {
-            "success": True,
-            "message": "IMAP fetch completed. Check logs for details."
         }
         
     except Exception as e:

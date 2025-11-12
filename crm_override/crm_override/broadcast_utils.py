@@ -8,10 +8,7 @@ from frappe.email.doctype.email_account.email_account import EmailAccount
 from urllib.parse import quote
 from frappe.utils import validate_email_address
 from crm_override.crm_override.email_tracker import update_tracker_on_email_send, update_tracker_on_email_error
-from crm_override.crm_override.email_threading.outbound_email_threading import (
-    ensure_communication_has_thread_id,
-    add_thread_id_to_outbound_email
-)
+from crm_override.crm_override.email_threading.outbound_email_threading import ensure_communication_has_thread_id
 
 def create_lead_segment(segmentname, lead_names, description=None):
     """
@@ -31,6 +28,253 @@ def create_lead_segment(segmentname, lead_names, description=None):
 
 
 @frappe.whitelist()
+def delete_lead_segment(name):
+    """
+    Delete a Lead Segment.
+
+    :param name: Name of the Lead Segment to delete
+    :return: Success message
+    """
+    frappe.delete_doc("Lead Segment", name, ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "message": f"Lead Segment '{name}' deleted successfully"
+    }
+
+
+# ============================================================
+# CRUD Operations for Campaigns
+# ============================================================
+
+@frappe.whitelist()
+def create_campaign(campaign_name, description=None):
+    """
+    Create a new Campaign.
+
+    :param campaign_name: Name of the Campaign
+    :param description: Optional description
+    :return: Campaign document
+    """
+    campaign = frappe.get_doc({
+        "doctype": "Campaign",
+        "campaign_name": campaign_name,
+        "description": description or ""
+    })
+    campaign.insert(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "name": campaign.name,
+        "campaign_name": campaign.campaign_name,
+        "description": campaign.description
+    }
+
+
+@frappe.whitelist()
+def list_campaigns():
+    """
+    Return all campaigns with details.
+    """
+    return frappe.get_all(
+        "Campaign",
+        fields=["name", "campaign_name", "description", "creation", "modified"],
+        order_by="creation desc"
+    )
+
+
+@frappe.whitelist()
+def get_campaign(name):
+    """
+    Get a specific Campaign with all details including schedules.
+
+    :param name: Name of the Campaign
+    :return: Campaign document
+    """
+    campaign = frappe.get_doc("Campaign", name)
+
+    schedules = []
+    for schedule in campaign.campaign_schedules:
+        schedules.append({
+            "email_template": schedule.email_template,
+            "send_after_days": schedule.send_after_days,
+            "send_after_minutes": schedule.send_after_minutes,
+            "idx": schedule.idx
+        })
+
+    return {
+        "name": campaign.name,
+        "campaign_name": campaign.campaign_name,
+        "description": campaign.description,
+        "creation": campaign.creation,
+        "modified": campaign.modified,
+        "campaign_schedules": schedules
+    }
+
+
+@frappe.whitelist()
+def update_campaign(name, campaign_name=None, description=None):
+    """
+    Update a Campaign.
+
+    :param name: Name of the Campaign to update
+    :param campaign_name: New campaign name (optional)
+    :param description: New description (optional)
+    :return: Updated Campaign
+    """
+    campaign = frappe.get_doc("Campaign", name)
+
+    if campaign_name:
+        campaign.campaign_name = campaign_name
+
+    if description is not None:
+        campaign.description = description
+
+    campaign.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "name": campaign.name,
+        "campaign_name": campaign.campaign_name,
+        "description": campaign.description
+    }
+
+
+@frappe.whitelist()
+def delete_campaign(name):
+    """
+    Delete a Campaign.
+
+    :param name: Name of the Campaign to delete
+    :return: Success message
+    """
+    frappe.delete_doc("Campaign", name, ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "message": f"Campaign '{name}' deleted successfully"
+    }
+
+
+# ============================================================
+# CRUD Operations for Email Campaigns
+# ============================================================
+
+@frappe.whitelist()
+def create_email_campaign(campaign_name, subject, message, sender_email=None):
+    """
+    Create a new Email Campaign.
+
+    :param campaign_name: Name of the Email Campaign
+    :param subject: Email subject
+    :param message: Email body
+    :param sender_email: Sender email (optional)
+    :return: Email Campaign document
+    """
+    email_campaign = frappe.get_doc({
+        "doctype": "Email Campaign",
+        "campaign_name": campaign_name,
+        "subject": subject,
+        "message": message,
+        "sender_email": sender_email or ""
+    })
+    email_campaign.insert(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "name": email_campaign.name,
+        "campaign_name": email_campaign.campaign_name,
+        "subject": email_campaign.subject,
+        "message": email_campaign.message,
+        "sender_email": email_campaign.sender_email
+    }
+
+
+@frappe.whitelist()
+def list_email_campaigns():
+    """
+    Return all email campaigns with details.
+    """
+    return frappe.get_all(
+        "Email Campaign",
+        fields=["name", "campaign_name", "subject", "sender_email", "creation", "modified"],
+        order_by="creation desc"
+    )
+
+
+@frappe.whitelist()
+def get_email_campaign(name):
+    """
+    Get a specific Email Campaign with all details.
+
+    :param name: Name of the Email Campaign
+    :return: Email Campaign document
+    """
+    email_campaign = frappe.get_doc("Email Campaign", name)
+
+    return {
+        "name": email_campaign.name,
+        "campaign_name": email_campaign.campaign_name,
+        "subject": email_campaign.subject,
+        "message": email_campaign.message,
+        "sender_email": email_campaign.sender_email,
+        "creation": email_campaign.creation,
+        "modified": email_campaign.modified
+    }
+
+
+@frappe.whitelist()
+def update_email_campaign(name, campaign_name=None, subject=None, message=None, sender_email=None):
+    """
+    Update an Email Campaign.
+
+    :param name: Name of the Email Campaign to update
+    :param campaign_name: New campaign name (optional)
+    :param subject: New subject (optional)
+    :param message: New message (optional)
+    :param sender_email: New sender email (optional)
+    :return: Updated Email Campaign
+    """
+    email_campaign = frappe.get_doc("Email Campaign", name)
+
+    if campaign_name:
+        email_campaign.campaign_name = campaign_name
+
+    if subject:
+        email_campaign.subject = subject
+
+    if message:
+        email_campaign.message = message
+
+    if sender_email is not None:
+        email_campaign.sender_email = sender_email
+
+    email_campaign.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "name": email_campaign.name,
+        "campaign_name": email_campaign.campaign_name,
+        "subject": email_campaign.subject,
+        "message": email_campaign.message,
+        "sender_email": email_campaign.sender_email
+    }
+
+
+@frappe.whitelist()
+def delete_email_campaign(name):
+    """
+    Delete an Email Campaign.
+
+    :param name: Name of the Email Campaign to delete
+    :return: Success message
+    """
+    frappe.delete_doc("Email Campaign", name, ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "message": f"Email Campaign '{name}' deleted successfully"
+    }.whitelist()
 def list_lead_segments():
     """
     Return all lead segments with both ID and human-readable name.
@@ -41,7 +285,7 @@ def list_lead_segments():
         order_by="creation desc"
     )
 
-def create_lead_email_tracker(lead_name, email_queue_name=None, communication_name=None, initial_status="Queued"):
+def create_lead_email_tracker(lead_name, email_queue_name=None, communication_name=None, initial_status="Queued",campaign_id=None):
     """
     Create Lead Email Tracker entry when email is queued/sent.
     Supports both campaign emails (email_queue_name) and manual emails (communication_name).
@@ -49,7 +293,7 @@ def create_lead_email_tracker(lead_name, email_queue_name=None, communication_na
     """
     try:
         # Log input parameters for debugging
-        frappe.logger().info(
+        print(
             f"[CREATE TRACKER] Lead: {lead_name} | "
             f"Email Queue: {email_queue_name} | "
             f"Communication: {communication_name} | "
@@ -61,12 +305,14 @@ def create_lead_email_tracker(lead_name, email_queue_name=None, communication_na
             filters["email_queue_status"] = email_queue_name
         if communication_name:
             filters["communication"] = communication_name
+        if campaign_id:
+            filters["email_campaign"] = campaign_id
 
         # Check for existing tracker
         existing = frappe.db.exists("Lead Email Tracker", filters)
         if existing:
             tracker = frappe.get_doc("Lead Email Tracker", existing)
-            frappe.logger().info(
+            print(
                 f"Tracker already exists: {tracker.name} | "
                 f"Communication field: {tracker.communication}"
             )
@@ -88,10 +334,11 @@ def create_lead_email_tracker(lead_name, email_queue_name=None, communication_na
             "resend_count": 0,
             "email_queue_status": email_queue_name,
             "communication": communication_name,  # Make sure this is set
+            "email_campaign": campaign_id
         }
 
         # Log the data being inserted
-        frappe.logger().info(f"[CREATE TRACKER] Data to insert: {tracker_data}")
+        print(f"[CREATE TRACKER] Data to insert: {tracker_data}")
 
         tracker = frappe.get_doc(tracker_data)
         tracker.insert(ignore_permissions=True)
@@ -99,7 +346,7 @@ def create_lead_email_tracker(lead_name, email_queue_name=None, communication_na
 
         # Verify the communication field after insert
         tracker.reload()
-        frappe.logger().info(
+        print(
             f"[CREATE TRACKER SUCCESS] Created tracker: {tracker.name} | "
             f"Communication field after insert: {tracker.communication} | "
             f"Email Queue: {tracker.email_queue_status}"
@@ -118,9 +365,11 @@ def create_lead_email_tracker(lead_name, email_queue_name=None, communication_na
         return None
 
 @frappe.whitelist()
-def send_email_to_segment(segment_name=None, lead_name=None, subject=None, message=None, sender_email=None, send_now=False, send_after_datetime=None):
+def send_email_to_segment(segment_name=None, lead_name=None, subject=None, message=None, sender_email=None, send_now=False, send_after_datetime=None, campaign_id=None):
     """
     Send an email to leads with proper SendGrid tracking and status updates
+    FIXED: Now generates proper Message-ID for email threading
+    Hook creates tracker automatically - no manual tracker creation
     """
     # --- STEP 1: Validate input ---
     if not segment_name and not lead_name:
@@ -148,7 +397,7 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
     except Exception:
         frappe.throw(f"Invalid sender email resolved: {sender_email}")
 
-    frappe.logger().info(f"[Email Debug] Final sender email: {sender_email}")
+    print(f"[Email Debug] Final sender email: {sender_email}")
 
     # --- STEP 3: Determine recipients ---
     leads = []
@@ -200,73 +449,7 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
             rendered_subject = frappe.render_template(subject, ctx)
             rendered_message = frappe.render_template(message, ctx)
 
-            # ✅ STEP 4.1: Create Email Queue FIRST (without message)
-            email_queue = frappe.get_doc({
-                "doctype": "Email Queue",
-                "priority": 1,
-                "status": "Not Sent",
-                "reference_doctype": "CRM Lead",
-                "reference_name": lead_doc.name,
-                "message": "",  # Will be set after tracker creation
-                "sender": sender_email,
-                "send_after": send_after_datetime if not send_now else now_datetime(),
-                "recipients": [{"recipient": recipient_email}],
-                "subject": rendered_subject,
-                "send_html_email": 1,
-                "content_type": "multipart/alternative",
-                "unsubscribe_method": "/api/method/frappe.email.queue.unsubscribe",
-            }).insert(ignore_permissions=True)
-            frappe.db.commit()
-
-            frappe.logger().info(f"[Campaign] Created Email Queue: {email_queue.name}")
-            add_thread_id_to_outbound_email(email_queue)
-
-            # ✅ STEP 4.2: Create tracker IMMEDIATELY (BEFORE Communication)
-            tracker = create_lead_email_tracker(
-                lead_doc.name,
-                email_queue_name=email_queue.name,
-                communication_name=None,  # Communication doesn't exist yet
-                initial_status="Queued"
-            )
-            
-            if not tracker:
-                frappe.logger().error(f"[Campaign] Failed to create tracker for Email Queue: {email_queue.name}")
-            else:
-                frappe.logger().info(f"[Campaign] Tracker created: {tracker.name}")
-
-            # ✅ STEP 4.3: Build MIME message with SendGrid custom args
-            from email.mime.multipart import MIMEMultipart
-            from email.mime.text import MIMEText
-            import json
-            
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = rendered_subject
-            msg['From'] = sender_email
-            msg['To'] = recipient_email
-            
-            # Add custom args for SendGrid webhook
-            custom_args = {
-                "email_queue_name": email_queue.name,
-                "lead_name": lead_doc.name,
-                "tracker_name": tracker.name if tracker else None
-            }
-            
-            msg.add_header('X-SMTPAPI', json.dumps({
-                "unique_args": custom_args,
-                "category": ["crm_campaign_email"]
-            }))
-            
-            frappe.logger().info(f"[Campaign] Custom args: {json.dumps(custom_args)}")
-            
-            # Add HTML content
-            html_part = MIMEText(rendered_message, 'html')
-            msg.attach(html_part)
-            
-            # Update Email Queue with MIME message
-            email_queue.message = msg.as_string()
-            email_queue.save(ignore_permissions=True)
-            frappe.db.commit()
-
+            # ✅ STEP 4.1: Create Communication FIRST (so we have the ID for tracker)
             initial_delivery_status = "" if not send_now and send_after_datetime else "Sending"
             
             comm = frappe.get_doc({
@@ -282,48 +465,116 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
                 "sent_or_received": "Sent",
                 "reference_doctype": "CRM Lead",
                 "reference_name": lead_id,
-                "email_queue": email_queue.name,
                 "email_status": "Open"
             })
+            
+            # ✅ Ensure Communication has thread_id BEFORE insert
             ensure_communication_has_thread_id(comm)
             comm.insert(ignore_permissions=True)
 
             if not send_now and send_after_datetime:
                 frappe.db.set_value("Communication", comm.name, "delivery_status", "Queued", update_modified=False)
                 frappe.db.set_value("Communication", comm.name, "status", "Queued", update_modified=False)
-                frappe.db.commit()
-                frappe.logger().info(f"[Campaign] Force-set Communication {comm.name} -> Queued")
+            
+            # ✅ COMMIT Communication immediately
             frappe.db.commit()
+            print(f"[Campaign] Created Communication: {comm.name} with thread_id: {comm.thread_id}")
 
-            frappe.logger().info(f"[Campaign] Created Communication: {comm.name} with status: {comm.status}, delivery_status: {comm.delivery_status}")
+            # ✅ STEP 4.2: Create Email Queue (with Communication link)
+            email_queue = frappe.get_doc({
+                "doctype": "Email Queue",
+                "priority": 1,
+                "status": "Not Sent",
+                "reference_doctype": "CRM Lead",
+                "reference_name": lead_doc.name,
+                "message": "",  # Will be set after MIME creation
+                "sender": sender_email,
+                "send_after": send_after_datetime if not send_now else now_datetime(),
+                "recipients": [{"recipient": recipient_email}],
+                "subject": rendered_subject,
+                "send_html_email": 1,
+                "content_type": "multipart/alternative",
+                "unsubscribe_method": "/api/method/frappe.email.queue.unsubscribe",
+                "communication": comm.name,  # ✅ Link Communication NOW
+                "email_campaign": campaign_id
+            }).insert(ignore_permissions=True)
+            
+            # ✅ COMMIT Email Queue immediately
+            frappe.db.commit()
+            print(f"[Campaign] Created Email Queue: {email_queue.name}")
 
-            # ✅ STEP 4.5: Link Communication to tracker
-            if tracker:
-                frappe.db.set_value(
+            # ✅ STEP 4.3: Wait for hook to create tracker
+            # The hook will create the tracker after Email Queue insert
+            # We just need to wait a moment and then fetch it
+            tracker_name = None
+            max_attempts = 10
+            for attempt in range(max_attempts):
+                tracker_name = frappe.db.get_value(
                     "Lead Email Tracker",
-                    tracker.name,
-                    "communication",
-                    comm.name,
-                    update_modified=False
+                    {
+                        "lead": lead_doc.name,
+                        "email_queue_status": email_queue.name,
+                        "communication": comm.name
+                    },
+                    "name"
                 )
-                frappe.db.commit()
-                frappe.logger().info(f"[Campaign] Linked tracker {tracker.name} to communication {comm.name}")
+                if tracker_name:
+                    print(f"[Campaign] Found tracker created by hook: {tracker_name} (attempt {attempt + 1})")
+                    break
+                
+                # Wait a bit for hook to complete
+                import time
+                time.sleep(0.1)
+                frappe.db.commit()  # Ensure we see latest data
+            
+            if not tracker_name:
+                print(f"[Campaign] WARNING: Tracker not found after {max_attempts} attempts for Email Queue: {email_queue.name}")
 
-            # ✅ STEP 4.6: Sync message_id if available
-            if email_queue.message_id:
-                frappe.db.set_value(
-                    "Communication",
-                    comm.name,
-                    "message_id",
-                    email_queue.message_id,
-                    update_modified=False
-                )
-                frappe.db.commit()
+            # ✅ STEP 4.4: Build MIME message with SendGrid custom args AND thread_id header
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
+            import json
+            
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = rendered_subject
+            msg['From'] = sender_email
+            msg['To'] = recipient_email
+            
+            # ✅ Add X-Frappe-Thread-ID header from Communication (for tracking)
+            msg['X-Frappe-Thread-ID'] = comm.thread_id
+            print(f"[Campaign] Added X-Frappe-Thread-ID header: {comm.thread_id}")
+            
+            # Add custom args for SendGrid webhook
+            custom_args = {
+                "email_queue_name": email_queue.name,
+                "lead_name": lead_doc.name,
+                "tracker_name": tracker_name,
+                "thread_id": comm.thread_id,
+                "communication": comm.name,
+                "campaign_id": campaign_id
+            }
+            
+            msg.add_header('X-SMTPAPI', json.dumps({
+                "unique_args": custom_args,
+                "category": ["crm_campaign_email"]
+            }))
+            
+            print(f"[Campaign] Custom args: {json.dumps(custom_args)}")
+            
+            # Add HTML content
+            html_part = MIMEText(rendered_message, 'html')
+            msg.attach(html_part)
+            
+            # Update Email Queue with MIME message
+            email_queue.message = msg.as_string()
+            email_queue.save(ignore_permissions=True)
+            frappe.db.commit()
+            print(f"[Campaign] Updated Email Queue {email_queue.name} with MIME message")
 
             status = "scheduled"
             msg_text = "Email queued successfully with tracking"
 
-            # ✅ STEP 4.7: Send immediately if requested
+            # ✅ STEP 4.5: Send immediately if requested
             if send_now:
                 try:
                     email_queue.reload()
@@ -332,17 +583,17 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
                     msg_text = "Email sent immediately with tracking"
                     
                     # ✅ Update tracker status to "Sent"
-                    if tracker:
+                    if tracker_name:
                         frappe.db.set_value(
                             "Lead Email Tracker",
-                            tracker.name,
+                            tracker_name,
                             "status",
                             "Sent",
                             update_modified=False
                         )
                         frappe.db.set_value(
                             "Lead Email Tracker",
-                            tracker.name,
+                            tracker_name,
                             "last_sent_on",
                             now_datetime(),
                             update_modified=False
@@ -370,10 +621,10 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
                     msg_text = f"Failed to send email: {str(send_error)}"
                     
                     # ✅ Update status to Error on failure
-                    if tracker:
+                    if tracker_name:
                         frappe.db.set_value(
                             "Lead Email Tracker",
-                            tracker.name,
+                            tracker_name,
                             "status",
                             "Error",
                             update_modified=False
@@ -395,7 +646,7 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
             
             try:
                 print("[Campaign] Triggering UI updates for Communication:", comm.name)
-                comm_doc = frappe.get_doc("Communication", tracker.communication)
+                comm_doc = frappe.get_doc("Communication", comm.name)
                 comm_doc.notify_change("update")
                 
                 # ✅ Get current delivery_status from DB
@@ -423,7 +674,7 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
                         docname=comm_doc.reference_name,
                         after_commit=True
                     )
-                    frappe.logger().info(f"[Campaign] Published timeline update for {comm_doc.reference_name}")
+                    print(f"[Campaign] Published timeline update for {comm_doc.reference_name}")
             except Exception as ui_error:
                 frappe.logger().error(f"[Campaign] Failed to trigger UI updates: {str(ui_error)}")
             
@@ -436,7 +687,8 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
                 "message": msg_text,
                 "communication_id": comm.name,
                 "email_queue_id": email_queue.name,
-                "tracker_id": tracker.name if tracker else None,
+                "tracker_id": tracker_name,
+                "thread_id": comm.thread_id,
                 "scheduled_time": str(send_after_datetime) if send_after_datetime else str(now_datetime())
             })
 
@@ -455,18 +707,42 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
         "results": responses
     }
 
+def get_latest_email_campaign_id(campaign_name: str,
+                                 recipient_type: str | None = None,
+                                 recipient_id: str | None = None) -> str | None:
+    filters = {"campaign_name": campaign_name}
+    if recipient_type:
+        filters["email_campaign_for"] = recipient_type   # e.g. "Lead Segment" / "CRM Lead"
+    if recipient_id:
+        filters["recipient"] = recipient_id              # e.g. "seg" / "CRM-LEAD-..."
+
+    rows = frappe.get_all(
+        "Email Campaign",
+        filters=filters,
+        fields=["name"],
+        order_by="creation desc",
+        limit=1,
+    )
+    return rows[0].name if rows else None
+
+
+
 @frappe.whitelist()
 def launch_campaign(campaign_name: str, recipient_type: str, recipient_id: str, sender_email: str, start_datetime=None):
     """
     Launch the campaign for either a Lead Segment or individual CRM Lead.
     Handles scheduling, delays, and email template rendering.
     """
-    frappe.logger().info(f"[Launch Campaign] Starting: {campaign_name} for {recipient_type}: {recipient_id}")
+    print(f"[Launch Campaign] Starting: {campaign_name} for {recipient_type}: {recipient_id}")
     
     campaign = frappe.get_doc("Campaign", campaign_name)
     if not campaign.campaign_schedules:
         frappe.throw("No schedules defined for this campaign.")
-
+    email_campaign_id = get_latest_email_campaign_id(campaign_name, recipient_type, recipient_id)
+    if not email_campaign_id:
+        print("Email Campaign record not found for the given campaign/recipient.")
+    else:
+        print(f"Email Campaign ID resolved: {email_campaign_id}")
     # Base start time
     base_time = get_datetime(start_datetime) if start_datetime else now_datetime()
 
@@ -495,7 +771,8 @@ def launch_campaign(campaign_name: str, recipient_type: str, recipient_id: str, 
                 "message": template_doc.response or template_doc.message or "",
                 "sender_email": sender_email,
                 "send_now": False,
-                "send_after_datetime": send_time
+                "send_after_datetime": send_time,
+                "campaign_id": email_campaign_id
             }
 
             if recipient_type == "Lead Segment":
@@ -820,254 +1097,4 @@ def update_lead_segment(name, segmentname=None, description=None, leads=None):
         "segmentname": segment.segmentname,
         "description": segment.description,
         "leads": [{"lead": item.lead} for item in segment.leads]
-    }
-
-
-@frappe.whitelist()
-def delete_lead_segment(name):
-    """
-    Delete a Lead Segment.
-
-    :param name: Name of the Lead Segment to delete
-    :return: Success message
-    """
-    frappe.delete_doc("Lead Segment", name, ignore_permissions=True)
-    frappe.db.commit()
-
-    return {
-        "message": f"Lead Segment '{name}' deleted successfully"
-    }
-
-
-# ============================================================
-# CRUD Operations for Campaigns
-# ============================================================
-
-@frappe.whitelist()
-def create_campaign(campaign_name, description=None):
-    """
-    Create a new Campaign.
-
-    :param campaign_name: Name of the Campaign
-    :param description: Optional description
-    :return: Campaign document
-    """
-    campaign = frappe.get_doc({
-        "doctype": "Campaign",
-        "campaign_name": campaign_name,
-        "description": description or ""
-    })
-    campaign.insert(ignore_permissions=True)
-    frappe.db.commit()
-
-    return {
-        "name": campaign.name,
-        "campaign_name": campaign.campaign_name,
-        "description": campaign.description
-    }
-
-
-@frappe.whitelist()
-def list_campaigns():
-    """
-    Return all campaigns with details.
-    """
-    return frappe.get_all(
-        "Campaign",
-        fields=["name", "campaign_name", "description", "creation", "modified"],
-        order_by="creation desc"
-    )
-
-
-@frappe.whitelist()
-def get_campaign(name):
-    """
-    Get a specific Campaign with all details including schedules.
-
-    :param name: Name of the Campaign
-    :return: Campaign document
-    """
-    campaign = frappe.get_doc("Campaign", name)
-
-    schedules = []
-    for schedule in campaign.campaign_schedules:
-        schedules.append({
-            "email_template": schedule.email_template,
-            "send_after_days": schedule.send_after_days,
-            "send_after_minutes": schedule.send_after_minutes,
-            "idx": schedule.idx
-        })
-
-    return {
-        "name": campaign.name,
-        "campaign_name": campaign.campaign_name,
-        "description": campaign.description,
-        "creation": campaign.creation,
-        "modified": campaign.modified,
-        "campaign_schedules": schedules
-    }
-
-
-@frappe.whitelist()
-def update_campaign(name, campaign_name=None, description=None):
-    """
-    Update a Campaign.
-
-    :param name: Name of the Campaign to update
-    :param campaign_name: New campaign name (optional)
-    :param description: New description (optional)
-    :return: Updated Campaign
-    """
-    campaign = frappe.get_doc("Campaign", name)
-
-    if campaign_name:
-        campaign.campaign_name = campaign_name
-
-    if description is not None:
-        campaign.description = description
-
-    campaign.save(ignore_permissions=True)
-    frappe.db.commit()
-
-    return {
-        "name": campaign.name,
-        "campaign_name": campaign.campaign_name,
-        "description": campaign.description
-    }
-
-
-@frappe.whitelist()
-def delete_campaign(name):
-    """
-    Delete a Campaign.
-
-    :param name: Name of the Campaign to delete
-    :return: Success message
-    """
-    frappe.delete_doc("Campaign", name, ignore_permissions=True)
-    frappe.db.commit()
-
-    return {
-        "message": f"Campaign '{name}' deleted successfully"
-    }
-
-
-# ============================================================
-# CRUD Operations for Email Campaigns
-# ============================================================
-
-@frappe.whitelist()
-def create_email_campaign(campaign_name, subject, message, sender_email=None):
-    """
-    Create a new Email Campaign.
-
-    :param campaign_name: Name of the Email Campaign
-    :param subject: Email subject
-    :param message: Email body
-    :param sender_email: Sender email (optional)
-    :return: Email Campaign document
-    """
-    email_campaign = frappe.get_doc({
-        "doctype": "Email Campaign",
-        "campaign_name": campaign_name,
-        "subject": subject,
-        "message": message,
-        "sender_email": sender_email or ""
-    })
-    email_campaign.insert(ignore_permissions=True)
-    frappe.db.commit()
-
-    return {
-        "name": email_campaign.name,
-        "campaign_name": email_campaign.campaign_name,
-        "subject": email_campaign.subject,
-        "message": email_campaign.message,
-        "sender_email": email_campaign.sender_email
-    }
-
-
-@frappe.whitelist()
-def list_email_campaigns():
-    """
-    Return all email campaigns with details.
-    """
-    return frappe.get_all(
-        "Email Campaign",
-        fields=["name", "campaign_name", "subject", "sender_email", "creation", "modified"],
-        order_by="creation desc"
-    )
-
-
-@frappe.whitelist()
-def get_email_campaign(name):
-    """
-    Get a specific Email Campaign with all details.
-
-    :param name: Name of the Email Campaign
-    :return: Email Campaign document
-    """
-    email_campaign = frappe.get_doc("Email Campaign", name)
-
-    return {
-        "name": email_campaign.name,
-        "campaign_name": email_campaign.campaign_name,
-        "subject": email_campaign.subject,
-        "message": email_campaign.message,
-        "sender_email": email_campaign.sender_email,
-        "creation": email_campaign.creation,
-        "modified": email_campaign.modified
-    }
-
-
-@frappe.whitelist()
-def update_email_campaign(name, campaign_name=None, subject=None, message=None, sender_email=None):
-    """
-    Update an Email Campaign.
-
-    :param name: Name of the Email Campaign to update
-    :param campaign_name: New campaign name (optional)
-    :param subject: New subject (optional)
-    :param message: New message (optional)
-    :param sender_email: New sender email (optional)
-    :return: Updated Email Campaign
-    """
-    email_campaign = frappe.get_doc("Email Campaign", name)
-
-    if campaign_name:
-        email_campaign.campaign_name = campaign_name
-
-    if subject:
-        email_campaign.subject = subject
-
-    if message:
-        email_campaign.message = message
-
-    if sender_email is not None:
-        email_campaign.sender_email = sender_email
-
-    email_campaign.save(ignore_permissions=True)
-    frappe.db.commit()
-
-    return {
-        "name": email_campaign.name,
-        "campaign_name": email_campaign.campaign_name,
-        "subject": email_campaign.subject,
-        "message": email_campaign.message,
-        "sender_email": email_campaign.sender_email
-    }
-
-
-@frappe.whitelist()
-def delete_email_campaign(name):
-    """
-    Delete an Email Campaign.
-
-    :param name: Name of the Email Campaign to delete
-    :return: Success message
-    """
-    frappe.delete_doc("Email Campaign", name, ignore_permissions=True)
-    frappe.db.commit()
-
-    return {
-        "message": f"Email Campaign '{name}' deleted successfully"
     }

@@ -1,0 +1,68 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-11-07 17:33:26.329374",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "message_id",
+  "thread_id",
+  "communication",
+  "created_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "message_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Message ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "thread_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Thread ID",
+   "reqd": 1
+  },
+  {
+   "fieldname": "communication",
+   "fieldtype": "Link",
+   "label": "Communication",
+   "options": "Communication"
+  },
+  {
+   "fieldname": "created_at",
+   "fieldtype": "Datetime",
+   "label": "Created At"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-11-10 19:22:04.082527",
+ "modified_by": "Administrator",
+ "module": "CRM Override",
+ "name": "Email Thread Mapping",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
