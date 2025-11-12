@@ -35,6 +35,12 @@
   "sender_full_name",
   "read_by_recipient",
   "read_by_recipient_on",
+  "validation_section",
+  "validation_status",
+  "validation_category",
+  "column_break_validation",
+  "validation_reason",
+  "validated_on",
   "reference_section",
   "reference_doctype",
   "reference_name",
@@ -228,6 +234,44 @@
    "fieldname": "read_by_recipient_on",
    "fieldtype": "Datetime",
    "label": "Read by Recipient On",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "validation_section",
+   "fieldtype": "Section Break",
+   "label": "AI Validation"
+  },
+  {
+   "fieldname": "validation_status",
+   "fieldtype": "Select",
+   "label": "Validation Status",
+   "options": "\nValidated\nLinked\nSkipped",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "validation_category",
+   "fieldtype": "Select",
+   "label": "Validation Category",
+   "options": "\nLead\nNon Lead\nQuery",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_validation",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "validation_reason",
+   "fieldtype": "Text",
+   "label": "Validation Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "validated_on",
+   "fieldtype": "Datetime",
+   "label": "Validated On",
    "read_only": 1
   },
   {

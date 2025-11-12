@@ -1,1 +1,2 @@
 crm_override.patches.rename_rejected_crm_lead_to_non_lead
+crm_override.patches.add_lead_classification_fields

@@ -1,0 +1,180 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "allow_rename": 0,
+ "autoname": "format:EVA-{####}",
+ "creation": "2025-01-10 12:00:00.000000",
+ "default_view": "List",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "communication_details_section",
+  "communication",
+  "sender_email",
+  "subject",
+  "column_break_comm",
+  "validated_on",
+  "validation_method",
+  "section_break_validation",
+  "category",
+  "previous_category",
+  "column_break_cat",
+  "validation_reason",
+  "section_break_lead",
+  "lead_doctype",
+  "lead_name"
+ ],
+ "fields": [
+  {
+   "fieldname": "communication_details_section",
+   "fieldtype": "Section Break",
+   "label": "Communication Details"
+  },
+  {
+   "fieldname": "communication",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Communication",
+   "options": "Communication",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sender_email",
+   "fieldtype": "Data",
+   "in_global_search": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Sender Email",
+   "options": "Email",
+   "reqd": 1
+  },
+  {
+   "fieldname": "subject",
+   "fieldtype": "Small Text",
+   "in_global_search": 1,
+   "label": "Subject"
+  },
+  {
+   "fieldname": "column_break_comm",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "validated_on",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Validated On",
+   "reqd": 1
+  },
+  {
+   "default": "Auto",
+   "fieldname": "validation_method",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Validation Method",
+   "options": "Auto\nManual",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_validation",
+   "fieldtype": "Section Break",
+   "label": "Validation Result"
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "Lead\nNon Lead\nQuery",
+   "reqd": 1
+  },
+  {
+   "fieldname": "previous_category",
+   "fieldtype": "Select",
+   "label": "Previous Category",
+   "options": "\nLead\nNon Lead\nQuery"
+  },
+  {
+   "fieldname": "column_break_cat",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "validation_reason",
+   "fieldtype": "Text",
+   "label": "Validation Reason"
+  },
+  {
+   "fieldname": "section_break_lead",
+   "fieldtype": "Section Break",
+   "label": "Lead Reference"
+  },
+  {
+   "fieldname": "lead_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Lead DocType",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "fieldname": "lead_name",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "label": "Lead Name",
+   "options": "lead_doctype",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-01-10 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "CRM Override",
+ "name": "Email Validation Audit",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales User",
+   "share": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

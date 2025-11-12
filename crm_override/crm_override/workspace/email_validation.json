@@ -1,0 +1,55 @@
+{
+ "charts": [],
+ "content": "[{\"type\":\"header\",\"data\":{\"text\":\"Email Validation Dashboard\",\"col\":12}},{\"type\":\"card\",\"data\":{\"card_name\":\"Email Validation Metrics\",\"col\":12}},{\"type\":\"chart\",\"data\":{\"chart_name\":\"Email Validation Widget\",\"col\":12,\"label\":\"Email Validation Widget\"}}]",
+ "creation": "2025-01-10 12:00:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "extends": "",
+ "extends_another_page": 0,
+ "icon": "email",
+ "idx": 0,
+ "is_hidden": 0,
+ "label": "Email Validation",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Email Validation Audit",
+   "link_count": 0,
+   "link_to": "Email Validation Audit",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Communication",
+   "link_count": 0,
+   "link_to": "Communication",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Custom Email Validator Settings",
+   "link_count": 0,
+   "link_to": "Custom Email Validator Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2025-01-10 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "CRM Override",
+ "name": "Email Validation",
+ "onboarding": "",
+ "owner": "Administrator",
+ "pin_to_bottom": 0,
+ "pin_to_top": 0,
+ "shortcuts": []
+}
