@@ -153,7 +153,11 @@ scheduler_events = {
     "cron": {
         "*/5 * * * *": [
             "crm_override.crm_override.tracker_sync.sync_email_tracker_status",
-            "crm_override.crm_override.email_tracker.sync_opens_from_sendgrid"
+            "crm_override.crm_override.email_tracker.sync_opens_from_sendgrid",
+            "crm_override.crm_override.email_threading.imap_fetcher.fetch_imap_emails"
+        ],
+        "*/2 * * * *": [
+            "crm_override.crm_override.email_threading.imap_fetcher.fetch_imap_emails"
         ]
     }
 }
@@ -173,14 +177,18 @@ print("  - Lead deduplication handled by find_or_create_lead()")
 print("="*80 + "\n")
 
 doc_events = {
+    "Communication": {
+        "before_insert": [
+            "crm_override.crm_override.email_threading.outbound_email_threading.ensure_communication_has_thread_id"
+        ],
+        "after_insert": [
+            "crm_override.crm_override.email_threading.outbound_email_threading.after_communication_insert"
+        ]
+    },
     "Email Queue": {
         "after_insert": "crm_override.crm_override.email_queue_hooks.on_email_queue_after_insert",
         "before_save": "crm_override.crm_override.email_queue_hooks.on_email_queue_before_save",
         "on_submit": "crm_override.crm_override.email_queue_hooks.on_email_queue_on_submit",
-    },
-    "Communication": {
-        "before_insert": "crm_override.crm_override.communication_hooks.validate_before_linking_to_lead",
-        "after_insert": "crm_override.crm_override.communication_hooks.add_validation_info_to_communication",
     }
 }
 
