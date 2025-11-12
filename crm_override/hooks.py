@@ -171,8 +171,9 @@ print("="*80 + "\n")
 # tracker and email validation
 print("\n" + "="*80)
 print("[HOOKS.PY] Registering Communication hooks...")
-print("  - before_insert: validate_before_linking_to_lead")
-print("  - after_insert: add_validation_info_to_communication")
+print("  - Communication.before_insert: validate_before_linking_to_lead")
+print("  - Communication.after_insert: add_validation_info_to_communication")
+print("  - Lead deduplication handled by find_or_create_lead()")
 print("="*80 + "\n")
 
 doc_events = {

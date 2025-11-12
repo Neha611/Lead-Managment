@@ -440,7 +440,8 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
             # Template context
             ctx = {
                 "lead_name": getattr(lead_doc, "lead_name", "") or lead_doc.name,
-                "company_name": getattr(lead_doc, "company_name", ""),
+                "organization": getattr(lead_doc, "organization", ""),
+                "company_name": getattr(lead_doc, "organization", ""),  # Alias for backwards compatibility
                 "email": recipient_email,
                 "mobile_no": getattr(lead_doc, "mobile_no", ""),
                 "sender_signature": frappe.get_value("User", frappe.session.user, "full_name") or sender_email,
@@ -569,7 +570,57 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
             email_queue.message = msg.as_string()
             email_queue.save(ignore_permissions=True)
             frappe.db.commit()
-            print(f"[Campaign] Updated Email Queue {email_queue.name} with MIME message")
+
+            initial_delivery_status = "" if not send_now and send_after_datetime else "Sending"
+            comm = frappe.get_doc({
+                "doctype": "Communication",
+                "communication_type": "Communication",
+                "communication_medium": "Email",
+                "subject": rendered_subject,
+                "content": rendered_message,
+                "sender": sender_email,
+                "recipients": recipient_email,
+                "cc": "",
+                "bcc": "",
+                "status": "Linked",
+                "delivery_status": initial_delivery_status,
+                "sent_or_received": "Sent",
+                "reference_doctype": "CRM Lead",
+                "reference_name": lead_id,
+                "email_status": "Open"
+            })
+            comm.insert(ignore_permissions=True)
+            if not send_now and send_after_datetime:
+                frappe.db.set_value("Communication", comm.name, "delivery_status", "Queued", update_modified=False)
+                frappe.db.set_value("Communication", comm.name, "status", "Queued", update_modified=False)
+                frappe.db.commit()
+                frappe.logger().info(f"[Campaign] Force-set Communication {comm.name} -> Queued")
+            frappe.db.commit()
+
+            frappe.logger().info(f"[Campaign] Created Communication: {comm.name} with status: {comm.status}, delivery_status: {comm.delivery_status}")
+
+            # ✅ STEP 4.5: Link Communication to tracker
+            if tracker:
+                frappe.db.set_value(
+                    "Lead Email Tracker",
+                    tracker.name,
+                    "communication",
+                    comm.name,
+                    update_modified=False
+                )
+                frappe.db.commit()
+                frappe.logger().info(f"[Campaign] Linked tracker {tracker.name} to communication {comm.name}")
+
+            # ✅ STEP 4.6: Sync message_id if available
+            if email_queue.message_id:
+                frappe.db.set_value(
+                    "Communication",
+                    comm.name,
+                    "message_id",
+                    email_queue.message_id,
+                    update_modified=False
+                )
+                frappe.db.commit()
 
             status = "scheduled"
             msg_text = "Email queued successfully with tracking"
@@ -643,7 +694,7 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
                         title="Email Send Failed",
                         message=f"Lead: {lead_doc.name}\nEmail: {recipient_email}\nError: {str(send_error)}"
                     )
-            
+
             try:
                 print("[Campaign] Triggering UI updates for Communication:", comm.name)
                 comm_doc = frappe.get_doc("Communication", comm.name)
@@ -693,10 +744,16 @@ def send_email_to_segment(segment_name=None, lead_name=None, subject=None, messa
             })
 
         except Exception as e:
-            frappe.log_error(title="Email Sending Error", message=frappe.get_traceback())
+            frappe.log_error(
+                title=f"Email Sending Error - Lead {lead_id}",
+                message=f"Error Type: {type(e).__name__}\n"
+                        f"Error Message: {str(e)}\n"
+                        f"Lead ID: {lead_id}\n\n"
+                        f"Full Traceback:\n{frappe.get_traceback()}"
+            )
             responses.append({
                 "lead": lead_id,
-                "email": getattr(lead_doc, "email", None),
+                "email": getattr(lead_doc, "email", None) if 'lead_doc' in locals() else None,
                 "status": "error",
                 "message": str(e)
             })
@@ -774,7 +831,6 @@ def launch_campaign(campaign_name: str, recipient_type: str, recipient_id: str, 
                 "send_after_datetime": send_time,
                 "campaign_id": email_campaign_id
             }
-
             if recipient_type == "Lead Segment":
                 kwargs["segment_name"] = recipient_id
             else:  # CRM Lead

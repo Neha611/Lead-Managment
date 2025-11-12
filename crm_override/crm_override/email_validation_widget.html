@@ -1,0 +1,187 @@
+<div class="email-validation-dashboard">
+	<!-- Header with Date Range Selector -->
+	<div class="dashboard-header">
+		<h3>Email Validation Dashboard</h3>
+		<div class="date-range-selector">
+			<label>Time Range:</label>
+			<select id="validation-date-range" class="form-control" style="width: auto; display: inline-block;">
+				<option value="24">Last 24 Hours</option>
+				<option value="168">Last 7 Days</option>
+				<option value="720">Last 30 Days</option>
+			</select>
+		</div>
+	</div>
+
+	<!-- Summary Cards -->
+	<div class="dashboard-cards">
+		<div class="card">
+			<div class="card-body">
+				<h6 class="text-muted">Total Validations</h6>
+				<h2 id="total-validations">-</h2>
+			</div>
+		</div>
+		<div class="card">
+			<div class="card-body">
+				<h6 class="text-muted">Leads</h6>
+				<h2 id="lead-count" class="text-success">-</h2>
+				<small id="lead-percentage" class="text-muted">-</small>
+			</div>
+		</div>
+		<div class="card">
+			<div class="card-body">
+				<h6 class="text-muted">Non Leads</h6>
+				<h2 id="non-lead-count" class="text-danger">-</h2>
+				<small id="non-lead-percentage" class="text-muted">-</small>
+			</div>
+		</div>
+		<div class="card">
+			<div class="card-body">
+				<h6 class="text-muted">Queries</h6>
+				<h2 id="query-count" class="text-warning">-</h2>
+				<small id="query-percentage" class="text-muted">-</small>
+			</div>
+		</div>
+	</div>
+
+	<!-- Conversion Rates -->
+	<div class="conversion-rates">
+		<h5>Conversion Rates</h5>
+		<div class="row">
+			<div class="col-md-4">
+				<div class="metric">
+					<span class="metric-label">Lead → Opportunity</span>
+					<span class="metric-value" id="lead-to-opportunity">-</span>
+				</div>
+			</div>
+			<div class="col-md-4">
+				<div class="metric">
+					<span class="metric-label">Query → Lead</span>
+					<span class="metric-value" id="query-to-lead">-</span>
+				</div>
+			</div>
+			<div class="col-md-4">
+				<div class="metric">
+					<span class="metric-label">Non Lead → Lead</span>
+					<span class="metric-value" id="non-lead-to-lead">-</span>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Category Distribution Chart -->
+	<div class="chart-section">
+		<h5>Category Distribution</h5>
+		<div id="category-chart"></div>
+	</div>
+
+	<!-- Validation Timeline Chart -->
+	<div class="chart-section">
+		<h5>Validation Timeline</h5>
+		<div id="timeline-chart"></div>
+	</div>
+
+	<!-- Top Senders Table -->
+	<div class="table-section">
+		<h5>Top Senders</h5>
+		<table class="table table-bordered" id="top-senders-table">
+			<thead>
+				<tr>
+					<th>Sender Email</th>
+					<th>Category</th>
+					<th>Count</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td colspan="3" class="text-center text-muted">Loading...</td>
+				</tr>
+			</tbody>
+		</table>
+	</div>
+
+	<!-- View All Audits Button -->
+	<div class="text-center" style="margin-top: 20px;">
+		<button class="btn btn-primary" id="view-all-audits">View All Validation Audits</button>
+	</div>
+</div>
+
+<style>
+.email-validation-dashboard {
+	padding: 20px;
+}
+
+.dashboard-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 20px;
+}
+
+.dashboard-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	gap: 15px;
+	margin-bottom: 30px;
+}
+
+.dashboard-cards .card {
+	border: 1px solid #e0e0e0;
+	border-radius: 8px;
+	transition: box-shadow 0.3s;
+}
+
+.dashboard-cards .card:hover {
+	box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.dashboard-cards .card-body {
+	padding: 20px;
+	text-align: center;
+}
+
+.dashboard-cards h2 {
+	margin: 10px 0;
+	font-size: 2em;
+}
+
+.conversion-rates {
+	background: #f8f9fa;
+	padding: 20px;
+	border-radius: 8px;
+	margin-bottom: 30px;
+}
+
+.conversion-rates .metric {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 10px 0;
+}
+
+.conversion-rates .metric-label {
+	font-weight: 500;
+	color: #666;
+}
+
+.conversion-rates .metric-value {
+	font-size: 1.5em;
+	font-weight: bold;
+	color: #2ecc71;
+}
+
+.chart-section {
+	margin-bottom: 30px;
+	padding: 20px;
+	background: white;
+	border: 1px solid #e0e0e0;
+	border-radius: 8px;
+}
+
+.table-section {
+	margin-bottom: 20px;
+}
+
+.table-section table {
+	background: white;
+}
+</style>

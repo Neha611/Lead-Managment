@@ -64,10 +64,11 @@
    "fieldtype": "Section Break"
   },
   {
-   "default": "You are an email classification system. Analyze the following raw email and determine if it was sent by a real person or if it is a promotional, automated, or notification-type email.\n\nDefinition:\n- \"Valid\" → Emails written or sent personally by a real human being (e.g., personal communication, client inquiry, recruiter message, colleague, friend, etc.)\n- \"Invalid\" → All other emails, including:\n  - Marketing, promotions, newsletters\n  - Automated notifications (e.g., receipts, password resets, order confirmations)\n  - System alerts or product updates\n  - Bulk or templated messages\n  - Social media notifications\n  - Phishing, spam, or scams\n\nUse the email headers, sender details, and body content to make this judgment.\n\nRespond with ONLY ONE WORD: either \"Valid\" or \"Invalid\".",
+   "default": "You are an email classification system. Analyze the following raw email and determine if it was sent by a real person or if it is a promotional, automated, or notification-type email.\n\nDefinition:\n- \"Valid\" → Emails written or sent personally by a real human being (e.g., personal communication, client inquiry, recruiter message, colleague, friend, etc.)\n- \"Invalid\" → All other emails, including:\n  - Marketing, promotions, newsletters\n  - Automated notifications (e.g., receipts, password resets, order confirmations)\n  - System alerts or product updates\n  - Bulk or templated messages\n  - Social media notifications\n  - Phishing, spam, or scams\n\nUse the email headers, sender details, and body content to make this judgment.\n\nYou must respond with a structured JSON object containing:\n- \"validity\": Either \"Valid\" or \"Invalid\"\n- \"tags\": Array of relevant tags describing the email (e.g., country, product type, business category, sender type)\n- \"reason\": Brief explanation of your decision",
    "fieldname": "validation_prompt",
    "fieldtype": "Text Editor",
-   "label": "Custom Validation Prompt"
+   "label": "Custom Validation Prompt",
+   "description": "Custom prompt for email validation. Must request structured JSON with validity, tags, and reason fields."
   }
  ],
  "issingle": 1,

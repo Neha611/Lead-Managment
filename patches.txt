@@ -1,0 +1,2 @@
+crm_override.patches.add_custom_tags_to_lead
+crm_override.patches.update_crm_view_settings
