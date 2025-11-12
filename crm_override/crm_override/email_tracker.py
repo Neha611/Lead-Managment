@@ -251,9 +251,13 @@ def sendgrid_webhook():
             
             # Update based on event type
             if event_type == 'open':
+                # Check if this is the first open
+                is_first_open = not tracker.opened
+                
                 # Set opened flag regardless
                 tracker.opened = 1
-                tracker.opened_at = now_datetime()
+                if not tracker.opened_at:
+                    tracker.opened_at = now_datetime()
                 
                 # Only update status if currently Sent or Delivered
                 # Don't override Clicked status
@@ -262,8 +266,12 @@ def sendgrid_webhook():
                 
                 tracker.save(ignore_permissions=True)
                 
-                # Increment campaign counter
-                increment_campaign_counter(tracker.email_campaign, "opened")
+                # Increment campaign counter ONLY on first open
+                if is_first_open:
+                    increment_campaign_counter(tracker.email_campaign, "opened")
+                    print(f"[SendGrid Webhook] First open - incremented campaign counter")
+                else:
+                    print(f"[SendGrid Webhook] Subsequent open - skipped campaign counter increment")
                     
                 # Update Communication only if status changed to Opened
                 if tracker.communication and tracker.status == "Opened":
@@ -300,14 +308,21 @@ def sendgrid_webhook():
                 print(f"[SendGrid Webhook] Updated tracker {tracker.name} -> Opened")
             
             elif event_type == 'click':
+                # Check if this is the first click
+                is_first_click = not tracker.clicked
+                
                 # Update clicked flag
                 tracker.clicked = 1
-                if tracker.status not in ["Clicked", "Opened"]:
+                if tracker.status not in ["Clicked"]:
                     tracker.status = "Clicked"
                 tracker.save(ignore_permissions=True)
                 
-                # Increment campaign counter
-                increment_campaign_counter(tracker.email_campaign, "clicked")
+                # Increment campaign counter ONLY on first click
+                if is_first_click:
+                    increment_campaign_counter(tracker.email_campaign, "clicked")
+                    print(f"[SendGrid Webhook] First click - incremented campaign counter")
+                else:
+                    print(f"[SendGrid Webhook] Subsequent click - skipped campaign counter increment")
                 
                 if tracker.communication:
                     comm = frappe.get_doc("Communication", tracker.communication)
@@ -482,22 +497,27 @@ def sync_opens_from_sendgrid():
                     as_dict=True
                 )
                 
-                if tracker and tracker.status != "Opened":
-                    # Update tracker (same logic as webhook)
-                    frappe.db.sql("""
-                        UPDATE `tabLead Email Tracker`
-                        SET status=%s, opened_at=%s
-                        WHERE name=%s
-                    """, ("Opened", now_datetime(), tracker.name))
+                if tracker:
+                    # Check if this is the first open
+                    is_first_open = not tracker.opened
                     
-                    # Increment campaign counter
-                    increment_campaign_counter(tracker.email_campaign, "opened")
-                    
-                    if tracker.communication:
-                        comm = frappe.get_doc("Communication", tracker.communication)
-                        comm.db_set("status", "Opened")
-                        comm.db_set("delivery_status", "Opened")
-                        comm.notify_change("update")
+                    if tracker.status != "Opened":
+                        # Update tracker (same logic as webhook)
+                        frappe.db.sql("""
+                            UPDATE `tabLead Email Tracker`
+                            SET status=%s, opened=%s, opened_at=%s
+                            WHERE name=%s
+                        """, ("Opened", 1, now_datetime(), tracker.name))
+                        
+                        # Increment campaign counter ONLY on first open
+                        if is_first_open:
+                            increment_campaign_counter(tracker.email_campaign, "opened")
+                        
+                        if tracker.communication:
+                            comm = frappe.get_doc("Communication", tracker.communication)
+                            comm.db_set("status", "Opened")
+                            comm.db_set("delivery_status", "Opened")
+                            comm.notify_change("update")
     
     frappe.db.commit()
     return "Synced"
