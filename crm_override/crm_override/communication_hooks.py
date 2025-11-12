@@ -127,20 +127,18 @@ def api_test_endpoint():
     }
 
 @frappe.whitelist(allow_guest=True, methods=["POST", "GET"])
-def api_find_or_create_lead(email, full_name=None, subject=None, doctype="CRM Lead", tags=None, organization=None):
+def api_find_or_create_lead(email, full_name=None, subject=None, doctype="CRM Lead", organization=None, mobile_no=None, tags=None, job_title=None, lead_name=None):
     """
     API endpoint to find or create a lead.
     Expects: email (str), full_name (str), subject (str), doctype (str), tags (list or comma-separated str), organization (str)
     """
     frappe.flags.ignore_csrf = True
-    print("Full name received: ", full_name)
     if tags and isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
-    lead = find_or_create_lead(email, full_name, subject, doctype, tags, organization)
-    print("Lead created: ", lead)
+    lead = find_or_create_lead(email, full_name, subject, doctype, tags, organization, mobile_no, job_title, lead_name)
     return {"lead_name": lead.name, "doctype": doctype}
 
-def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None, organization=None):
+def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None, organization=None, mobile_no=None, job_title=None, lead_name=None):
 	"""
 	Find existing lead by email or create new one with row-level locking to prevent duplicates.
 	Uses SELECT FOR UPDATE with retry logic for race conditions.
@@ -158,7 +156,6 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 		Lead document (existing or newly created)
 	"""
 	logger = frappe.logger("email_validation", allow_site=True, file_count=5)
-	print("FIND OR CREATE LEAD CALLED")
 	max_retries = 3
 	for attempt in range(max_retries):
 		try:
@@ -197,6 +194,15 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 						lead.organization = organization
 						updated = True
 						logger.info(f"📝 Updating organization for {doctype}: {lead.name} - Organization: {organization}")
+
+				if mobile_no:
+					if lead.get("mobile_no") != mobile_no:
+						lead.mobile_no = mobile_no
+						updated = True
+				if job_title:
+					if lead.get("job_title") != job_title:
+						lead.job_title = job_title
+						updated = True
 
 				# Update full_name if provided and different
 				if full_name and lead.get("lead_name") != full_name:
@@ -266,6 +272,15 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 					if lead.get("organization") != organization:
 						lead.organization = organization
 						updated = True
+				
+				if mobile_no:
+					if lead.get("mobile_no") != mobile_no:
+						lead.mobile_no = mobile_no
+						updated = True
+				if job_title:
+					if lead.get("job_title") != job_title:
+						lead.job_title = job_title
+						updated = True
 
 				# Update full_name if provided and different
 				if full_name and lead.get("lead_name") != full_name:
@@ -313,6 +328,15 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 				if organization:
 					if lead.get("organization") != organization:
 						lead.organization = organization
+						updated = True
+				
+				if mobile_no:
+					if lead.get("mobile_no") != mobile_no:
+						lead.mobile_no = mobile_no
+						updated = True
+				if job_title:
+					if lead.get("job_title") != job_title:
+						lead.job_title = job_title
 						updated = True
 
 				# Update full_name if provided and different
@@ -434,8 +458,18 @@ Subject: {subject}
 
 	# Validate with Gemini (returns structured output)
 	validation_result = validate_email_with_gemini(raw_email, sender, subject)
-	print("This is the validation result: ")
-	print(validation_result)
+
+	# Handle case where validation returns None (error in validation function)
+	if not validation_result or not isinstance(validation_result, dict):
+		logger.error(f"❌ Validation failed or returned invalid result: {validation_result}")
+		# Default to creating a Lead without validation
+		validation_result = {
+			"category": "Lead",
+			"tags": [],
+			"organization": None,
+			"reason": "Validation failed - defaulted to Lead"
+		}
+
 	doc.flags.ai_validation_result = validation_result
 
 	# Extract category from structured response (Lead/Non Lead/Query)
@@ -509,8 +543,14 @@ def add_validation_info_to_communication(doc, method=None):  # noqa: ARG001
 		doc: Communication document
 		method: Hook method name (unused but required by Frappe hook signature)
 	"""
-	if hasattr(doc.flags, 'ai_validation_result'):
+	if hasattr(doc.flags, 'ai_validation_result') and doc.flags.ai_validation_result:
 		validation_result = doc.flags.ai_validation_result
+
+		# Validate that validation_result is a dict
+		if not isinstance(validation_result, dict):
+			logger = frappe.logger("email_validation", allow_site=True, file_count=5)
+			logger.error(f"❌ Invalid validation_result type: {type(validation_result)}")
+			return
 
 		# Extract structured data
 		category = validation_result.get("category", "Lead")
