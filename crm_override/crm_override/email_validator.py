@@ -195,7 +195,7 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 					"response_mode": "blocking",
 					"user": "TradyonCRM"
 				},
-				timeout=30
+				timeout=180
 			)
 			print(response.json())
 			if response.status_code != 200:
