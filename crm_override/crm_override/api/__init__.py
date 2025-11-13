@@ -266,6 +266,10 @@ def ingest_emails_batch(emails_data, email_account_name=None):
             sender = inbound_mail.from_email
 
             try:
+                # Clear any previous error messages to avoid showing old errors
+                if hasattr(frappe.local, "message_log"):
+                    frappe.local.message_log = []
+
                 # Process through pipeline
                 communication = inbound_mail.process()
                 processed += 1
@@ -282,6 +286,16 @@ def ingest_emails_batch(emails_data, email_account_name=None):
                     result["ai_validation"] = communication.flags.ai_validation_result
 
                 results.append(result)
+
+                # Clear error messages after successful processing
+                # This prevents "Communication not found" errors from showing up
+                # when InboundMail tries to find parent by Message-ID
+                if hasattr(frappe.local, "message_log"):
+                    # Filter out "Communication not found" errors for Message-IDs
+                    frappe.local.message_log = [
+                        msg for msg in frappe.local.message_log
+                        if not ("Communication" in str(msg) and "not found" in str(msg))
+                    ]
 
             except Exception as process_error:
                 error_msg = str(process_error)
