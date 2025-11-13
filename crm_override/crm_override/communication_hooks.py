@@ -1,5 +1,6 @@
 import frappe
 from crm_override.crm_override.email_validator import validate_email_with_gemini, is_validation_enabled
+from crm_override.crm_override.broadcast_utils import add_lead_to_segment
 
 # Module loaded confirmation - only visible during bench start in dev
 # In production, this goes to supervisor logs
@@ -138,7 +139,7 @@ def api_find_or_create_lead(email, full_name=None, subject=None, doctype="CRM Le
     lead = find_or_create_lead(email, full_name, subject, doctype, tags=tags, organization=organization, mobile_no=mobile_no, job_title=job_title, lead_name=lead_name)
     return {"lead_name": lead.name, "doctype": doctype}
 # tags, organization, products, market, lead_type
-def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None, organization=None, products=None, market=None, lead_type=None, mobile_no=None, job_title=None, lead_name=None):
+def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None, organization=None, products=None, market=None, lead_type=None, mobile_no=None, job_title=None, lead_name=None, lead_role=None):
 	"""
 	Find existing lead by email or create new one with row-level locking to prevent duplicates.
 	Uses SELECT FOR UPDATE with retry logic for race conditions.
@@ -203,6 +204,14 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 					if lead.get("job_title") != job_title:
 						lead.job_title = job_title
 						updated = True
+				if lead_type:
+					if lead.get("lead_type") != lead_type:
+						lead.lead_type = lead_type
+						updated = True
+				if lead_role:
+					if lead.get("lead_role") != lead_role:
+						lead.lead_role = lead_role
+						updated = True
 
 				# Update full_name if provided and different
 				if full_name and lead.get("lead_name") != full_name:
@@ -246,10 +255,13 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 				lead_data["lead_type"] = lead_type
 
 			if products:
-				lead_data["products"] = products
+				lead_data["custom_products"] = products
 
 			if market:
 				lead_data["market"] = market
+			
+			if lead_role:
+				lead_data["lead_role"] = lead_role
 
 			lead = frappe.get_doc(lead_data)
 
@@ -295,6 +307,10 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 				if job_title:
 					if lead.get("job_title") != job_title:
 						lead.job_title = job_title
+						updated = True
+				if lead_role:
+					if lead.get("lead_role") != lead_role:
+						lead.lead_role = lead_role
 						updated = True
 
 				# Update full_name if provided and different
@@ -352,6 +368,10 @@ def find_or_create_lead(email, full_name, subject, doctype="CRM Lead", tags=None
 				if job_title:
 					if lead.get("job_title") != job_title:
 						lead.job_title = job_title
+						updated = True
+				if lead_role:
+					if lead.get("lead_role") != lead_role:
+						lead.lead_role = lead_role
 						updated = True
 
 				# Update full_name if provided and different
@@ -485,7 +505,9 @@ Subject: {subject}
 			"reason": "Validation failed - defaulted to Lead",
 			"product": None,
 			"market": None,
-			"lead_type": "Unclassified"
+			"lead_type": "Unclassified",
+			"lead_role": None,
+			"mobile_no": None
 		}
 
 	doc.flags.ai_validation_result = validation_result
@@ -498,6 +520,8 @@ Subject: {subject}
 	products = validation_result.get("product", None)
 	market = validation_result.get("market", None)
 	lead_type = validation_result.get("lead_type", "Unclassified")
+	mobile_no = validation_result.get("mobile_no", None)
+	lead_role = validation_result.get("lead_role", None)
 	logger.info(f"📋 Validation Result:")
 	logger.info(f"   Category: {category}")
 	logger.info(f"   Tags: {tags}")
@@ -512,12 +536,21 @@ Subject: {subject}
 	# Find or create Lead based on category
 	if category == "Lead":
 		# Lead email - create/find CRM Lead
-		lead = find_or_create_lead(sender, sender_full_name, subject, "CRM Lead", tags=tags, organization=organization, products=products, market=market, lead_type=lead_type)
+		lead = find_or_create_lead(sender, sender_full_name, subject, "CRM Lead", tags=tags, organization=organization, products=products, market=market, lead_type=lead_type, mobile_no=mobile_no, lead_role=lead_role)
 
 		# Set reference fields
 		doc.reference_doctype = "CRM Lead"
 		doc.reference_name = lead.name
-
+		segment_ids = validation_result.get("segment_ids", [])
+		if isinstance(segment_ids, str):
+			segment_ids = [seg.strip() for seg in segment_ids.split(",") if seg.strip()]
+		for segment in segment_ids:
+			print(segment)
+			try:
+				if segment != "null":
+					add_lead_to_segment(segment, lead.name)
+			except Exception as e:
+				logger.error(f"❌ Failed to add lead to segment {segment}: {str(e)}")
 		logger.info("✅ LEAD EMAIL")
 		logger.info(f"✅ Successfully linked Communication to CRM Lead: {lead.name}")
 		logger.info(f"   reference_doctype: {doc.reference_doctype}")
@@ -525,7 +558,7 @@ Subject: {subject}
 
 	elif category == "Non Lead":
 		# Non Lead email - create/find Non Lead
-		lead = find_or_create_lead(sender, sender_full_name, subject, "Non Lead", tags=tags, organization=organization, products=products, market=market, lead_type=lead_type)
+		lead = find_or_create_lead(sender, sender_full_name, subject, "Non Lead", tags=tags, organization=organization, products=products, market=market, lead_type=lead_type, mobile_no=mobile_no, lead_role=lead_role)
 
 		# Set reference fields
 		doc.reference_doctype = "Non Lead"
@@ -540,7 +573,7 @@ Subject: {subject}
 
 	elif category == "Query":
 		# Query email - create/find Query
-		lead = find_or_create_lead(sender, sender_full_name, subject, "Query", tags=tags, organization=organization, products=products, market=market, lead_type=lead_type)
+		lead = find_or_create_lead(sender, sender_full_name, subject, "Query", tags=tags, organization=organization, products=products, market=market, lead_type=lead_type, mobile_no=mobile_no, lead_role=lead_role)
 
 		# Set reference fields
 		doc.reference_doctype = "Query"
