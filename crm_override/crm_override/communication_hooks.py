@@ -1,6 +1,7 @@
 import frappe
 from crm_override.crm_override.email_validator import validate_email_with_gemini, is_validation_enabled
 from crm_override.crm_override.broadcast_utils import add_lead_to_segment
+from crm_override.crm_override.broadcast_utils import add_lead_to_segment
 
 # Module loaded confirmation - only visible during bench start in dev
 # In production, this goes to supervisor logs
@@ -544,6 +545,8 @@ Subject: {subject}
 		segment_ids = validation_result.get("segment_ids", [])
 		if isinstance(segment_ids, str):
 			segment_ids = [seg.strip() for seg in segment_ids.split(",") if seg.strip()]
+		if isinstance(segment_ids, None):
+			segment_ids = []
 		for segment in segment_ids:
 			print(segment)
 			try:
