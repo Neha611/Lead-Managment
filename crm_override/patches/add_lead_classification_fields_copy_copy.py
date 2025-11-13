@@ -15,9 +15,9 @@ def execute():
         fields_to_add = []
 
         # Define the new fields
-        if "products" not in existing_fields:
+        if "custom_products" not in existing_fields:
             fields_to_add.append({
-                "fieldname": "products",
+                "fieldname": "custom_products",
                 "fieldtype": "Small Text",
                 "label": "Products",
                 "description": "Products of interest identified from email validation",

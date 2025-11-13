@@ -1,5 +1,7 @@
 import frappe
+import json
 import requests
+import re
 
 
 def get_validation_settings():
@@ -155,9 +157,33 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 			email_text = str(raw_email_content)
 
 
+		# Get all Lead Segments with ID and description
+		lead_segment_array = []
+		try:
+			segments = frappe.get_all("Lead Segment", fields=["name", "description"], order_by="modified desc")
+			print(segments)
+			lead_segment_array = [
+				{
+					"lead_id": seg.get("name"),
+					"description": seg.get("description") or ""
+				}
+				for seg in segments
+			]
+			for item in lead_segment_array:
+				item['description'] = re.sub(r"<.*?>", "", item['description'])
+
+			logger.info(f"📋 Fetched {len(lead_segment_array)} segments for AI validation")
+		except Exception as seg_error:
+			logger.error(f"❌ Failed to fetch segments: {str(seg_error)}")
+			lead_segment_array = []
+
 		# Call AI validation API
 		try:
 			# logger.warning("⚠️  Temporary debug log before API call", api_key)
+			lead_segment_array = json.dumps(lead_segment_array)
+			print(lead_segment_array)
+			print(isinstance(lead_segment_array, list))
+			print(isinstance(lead_segment_array, str))
 			response = requests.post(
 				"https://lab.tradyon.ai/v1/workflows/run",
 				headers={
@@ -165,7 +191,7 @@ def validate_email_with_gemini(raw_email_content, sender_email=None, subject=Non
 					"Content-Type": "application/json"
 				},
 				json={
-					"inputs": {"raw_email": email_text},
+					"inputs": {"raw_email": email_text, "lead_segment_array": lead_segment_array},
 					"response_mode": "blocking",
 					"user": "TradyonCRM"
 				},
