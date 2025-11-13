@@ -1,6 +1,7 @@
 import frappe
 from crm_override.crm_override.email_validator import validate_email_with_gemini, is_validation_enabled
 from crm_override.crm_override.broadcast_utils import add_lead_to_segment
+from crm_override.crm_override.broadcast_utils import add_lead_to_segment
 
 # Module loaded confirmation - only visible during bench start in dev
 # In production, this goes to supervisor logs
