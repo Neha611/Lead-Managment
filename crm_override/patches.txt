@@ -3,3 +3,4 @@ crm_override.patches.add_lead_classification_fields_copy
 crm_override.patches.add_lead_classification_fields_copy_copy
 crm_override.patches.add_lead_classification_fields
 crm_override.patches.fix_products_field_in_view_settings
+crm_override.patches.add_description_to_lead_segment_list
