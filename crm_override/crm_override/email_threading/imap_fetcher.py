@@ -6,6 +6,7 @@ Scheduled task that fetches unseen emails from IMAP server
 import frappe
 from frappe.utils import now_datetime
 import imaplib
+import base64
 from crm_override.crm_override.email_threading.email_utils import normalize_imap_email
 from crm_override.crm_override.email_threading.email_processor import process_incoming_email
 
@@ -103,7 +104,7 @@ def get_imap_config() -> dict:
         email_accounts = frappe.get_all(
             "Email Account",
             filters={"enable_incoming": 1, "use_imap": 1},
-            fields=["name", "email_id", "email_server", "incoming_port", "use_ssl", "password"]
+            fields=["name", "email_id", "email_server", "incoming_port", "use_ssl", "password", "connected_app"]
         )
 
         if not email_accounts:
@@ -112,17 +113,29 @@ def get_imap_config() -> dict:
 
         account = email_accounts[0]
 
-        # Decrypt password securely
-        from frappe.utils.password import get_decrypted_password
-        password = get_decrypted_password("Email Account", account.name, "password", raise_exception=False)
+        # Check if using OAuth (Connected App) or password
+        password = None
+        access_token = None
+
+        if account.connected_app:
+            # Using OAuth - get access token
+            access_token = get_oauth_access_token(account.name)
+            print(f"[IMAP Fetcher] Using OAuth authentication for {account.name}")
+        else:
+            # Using password authentication
+            from frappe.utils.password import get_decrypted_password
+            password = get_decrypted_password("Email Account", account.name, "password", raise_exception=False)
+            print(f"[IMAP Fetcher] Using password authentication for {account.name}")
 
         config = {
             "host": account.email_server,
             "port": account.incoming_port or 993,
             "email": account.email_id,
             "password": password,
+            "access_token": access_token,
             "use_ssl": account.use_ssl,
-            "account_name": account.name
+            "account_name": account.name,
+            "connected_app": account.connected_app
         }
 
         print(f"[IMAP Fetcher] Loaded IMAP config from Email Account: {account.name}")
@@ -139,29 +152,39 @@ def get_imap_config() -> dict:
 def connect_imap(config: dict):
     """
     Connect to IMAP server using configuration
+    Supports both password and OAuth authentication
     """
     try:
         host = config.get('host')
         port = config.get('port', 993)
         email_addr = config.get('email')
         password = config.get('password')
+        access_token = config.get('access_token')
         use_ssl = config.get('use_ssl', True)
-        
+
         print(f"[IMAP Fetcher] Connecting to {host}:{port}")
-        
+
         # Connect
         if use_ssl:
             mail = imaplib.IMAP4_SSL(host, port)
         else:
             mail = imaplib.IMAP4(host, port)
-        
-        # Login
-        mail.login(email_addr, password)
-        
-        print("[IMAP Fetcher] Successfully connected and authenticated")
-        
+
+        # Authenticate based on available credentials
+        if access_token:
+            # OAuth authentication using XOAUTH2
+            auth_string = generate_oauth2_string(email_addr, access_token)
+            mail.authenticate('XOAUTH2', lambda x: auth_string)
+            print("[IMAP Fetcher] Successfully authenticated using OAuth")
+        elif password:
+            # Password authentication
+            mail.login(email_addr, password)
+            print("[IMAP Fetcher] Successfully authenticated using password")
+        else:
+            raise Exception("No authentication credentials provided (neither password nor OAuth token)")
+
         return mail
-        
+
     except Exception as e:
         frappe.log_error(
             title="IMAP Connection Failed",
@@ -170,6 +193,47 @@ def connect_imap(config: dict):
                    f"{frappe.get_traceback()}"
         )
         return None
+
+
+def get_oauth_access_token(email_account_name: str) -> str:
+    """
+    Get OAuth access token for email account using Connected App
+    """
+    try:
+        email_account = frappe.get_doc("Email Account", email_account_name)
+
+        if not email_account.connected_app:
+            return None
+
+        # Get connected user (usually the email account's user)
+        connected_user = email_account.connected_user or frappe.session.user
+
+        # Get access token from Connected App
+        from frappe.integrations.doctype.connected_app.connected_app import get_connection
+        connection = get_connection(email_account.connected_app, connected_user)
+
+        if connection and hasattr(connection, 'access_token'):
+            return connection.access_token
+
+        return None
+
+    except Exception as e:
+        frappe.log_error(
+            title="OAuth Token Fetch Failed",
+            message=f"Email Account: {email_account_name}\n"
+                   f"Error: {str(e)}\n"
+                   f"{frappe.get_traceback()}"
+        )
+        return None
+
+
+def generate_oauth2_string(email: str, access_token: str) -> str:
+    """
+    Generate OAuth2 authentication string for IMAP XOAUTH2
+    Format: base64(user={email}\x01auth=Bearer {token}\x01\x01)
+    """
+    auth_string = f'user={email}\x01auth=Bearer {access_token}\x01\x01'
+    return base64.b64encode(auth_string.encode()).decode()
 
 
 @frappe.whitelist()
