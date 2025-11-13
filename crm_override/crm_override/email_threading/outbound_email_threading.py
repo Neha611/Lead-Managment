@@ -38,11 +38,19 @@ def ensure_communication_has_thread_id(comm_doc, method=None):
     """
     Ensure all Communications have thread_id and message_id
     This runs BEFORE insert (before_insert hook)
-    
+
+    IMPORTANT: Only runs for SENT/outbound emails to avoid interfering with
+    the email validation flow for incoming emails.
+
     CRITICAL FIX: Check email headers FIRST before falling back to other methods
     This ensures replies inherit the correct thread even when in_reply_to field isn't set
     """
     try:
+        # CRITICAL: Skip for incoming emails - let validation hooks handle them
+        sent_or_received = getattr(comm_doc, "sent_or_received", "Sent")
+        if sent_or_received == "Received":
+            print(f"[Thread ID] Skipping received email - handled by validation flow")
+            return
         # Step 0: Generate message_id if not present (for outbound emails)
         if not getattr(comm_doc, "message_id", None) and getattr(comm_doc, "sent_or_received", "") == "Sent":
             # Generate a unique message_id for outbound emails
@@ -214,10 +222,19 @@ def after_communication_insert(comm_doc, method=None):
     After Communication created - placeholder for future thread mapping
     This runs AFTER insert (after_insert hook)
 
+    IMPORTANT: Only runs for SENT/outbound emails to avoid interfering with
+    the email validation flow for incoming emails.
+
     NOTE: Thread mapping storage is currently disabled to prevent validation errors
     during bulk email ingestion from sources that don't have Message-IDs
     """
     try:
+        # CRITICAL: Skip for incoming emails - let validation hooks handle them
+        sent_or_received = getattr(comm_doc, "sent_or_received", "Sent")
+        if sent_or_received == "Received":
+            frappe.logger().debug(f"[Thread ID] Skipping received email - handled by validation flow")
+            return
+
         message_id = getattr(comm_doc, "message_id", None)
         thread_id = getattr(comm_doc, "thread_id", None)
 

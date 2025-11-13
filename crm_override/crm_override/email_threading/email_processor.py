@@ -44,13 +44,21 @@ def process_incoming_email(normalized_email: Dict) -> Optional[str]:
         parent_comm_name = None
         
         if in_reply_to_header:
-            # Look up the Communication that has this Message-ID
+            # Try Email Thread Mapping first (fast lookup if available)
             parent_comm_name = frappe.db.get_value(
                 "Email Thread Mapping",
                 {"message_id": in_reply_to_header},
                 "communication"
             )
-            
+
+            # Fallback: Direct lookup by message_id in Communication table
+            if not parent_comm_name:
+                parent_comm_name = frappe.db.get_value(
+                    "Communication",
+                    {"message_id": in_reply_to_header},
+                    "name"
+                )
+
             if parent_comm_name:
                 # Now get the full Communication details
                 parent_comm = frappe.db.get_value(
@@ -59,15 +67,16 @@ def process_incoming_email(normalized_email: Dict) -> Optional[str]:
                     ["name", "reference_doctype", "reference_name", "thread_id", "message_id"],
                     as_dict=True
                 )
-                
+
                 if parent_comm:
                     print(
-                        f"[Email Processor] ✅ Found parent via mapping: {parent_comm_name}\n"
+                        f"[Email Processor] ✅ Found parent Communication: {parent_comm_name}\n"
                         f"  Parent Message-ID: {parent_comm.message_id}\n"
                         f"  Parent Thread-ID: {parent_comm.thread_id}"
                     )
                 else:
-                    print(f"[Email Processor] ⚠️ Mapping found but Communication {parent_comm_name} not found")
+                    print(f"[Email Processor] ⚠️ Communication {parent_comm_name} exists but couldn't load details")
+                    parent_comm_name = None
         
         # FALLBACK: Try to find parent by subject line (for emails with/without In-Reply-To)
         # This handles campaign emails that may not have stored mappings or In-Reply-To headers

@@ -179,10 +179,12 @@ print("="*80 + "\n")
 doc_events = {
     "Communication": {
         "before_insert": [
-            "crm_override.crm_override.email_threading.outbound_email_threading.ensure_communication_has_thread_id"
+            "crm_override.crm_override.email_threading.outbound_email_threading.ensure_communication_has_thread_id",
+            "crm_override.crm_override.communication_hooks.validate_before_linking_to_lead"
         ],
         "after_insert": [
-            "crm_override.crm_override.email_threading.outbound_email_threading.after_communication_insert"
+            "crm_override.crm_override.email_threading.outbound_email_threading.after_communication_insert",
+            "crm_override.crm_override.communication_hooks.add_validation_info_to_communication"
         ]
     },
     "Email Queue": {
