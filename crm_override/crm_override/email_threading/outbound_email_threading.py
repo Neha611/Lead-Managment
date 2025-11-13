@@ -211,53 +211,33 @@ def ensure_communication_has_thread_id(comm_doc, method=None):
 
 def after_communication_insert(comm_doc, method=None):
     """
-    After Communication created, store Message-ID to Thread-ID mapping
+    After Communication created - placeholder for future thread mapping
     This runs AFTER insert (after_insert hook)
 
-    This ensures fast lookup for future threading
-
-    IMPORTANT: Silently skips mapping if message_id is missing to prevent errors
+    NOTE: Thread mapping storage is currently disabled to prevent validation errors
     during bulk email ingestion from sources that don't have Message-IDs
     """
     try:
         message_id = getattr(comm_doc, "message_id", None)
         thread_id = getattr(comm_doc, "thread_id", None)
 
-        # Only create mapping if both message_id and thread_id exist
+        # Log for debugging purposes only - no mapping storage
         if message_id and thread_id:
-            # Clean and validate message_id
-            message_id_clean = _clean_message_id(message_id)
-
-            # Double-check that cleaned message_id is valid
-            if message_id_clean and message_id_clean != '<>':
-                try:
-                    store_message_thread_mapping(message_id_clean, thread_id, comm_doc.name)
-                    print(
-                        f"[Thread ID] ✅ Stored mapping | "
-                        f"Message-ID: {message_id_clean} -> Thread: {thread_id}"
-                    )
-                except Exception as mapping_error:
-                    # Log but don't fail - Communication is already created
-                    frappe.logger().warning(
-                        f"[Thread ID] Failed to store mapping for {comm_doc.name}: {str(mapping_error)}"
-                    )
-            else:
-                frappe.logger().debug(
-                    f"[Thread ID] Skipping invalid message_id for {comm_doc.name}: {message_id}"
-                )
+            frappe.logger().debug(
+                f"[Thread ID] Communication created | "
+                f"Message-ID: {message_id} | Thread: {thread_id}"
+            )
         else:
-            # Log missing data at debug level (not warning) since it's expected for some emails
             if not message_id:
                 frappe.logger().debug(
-                    f"[Thread ID] Communication {comm_doc.name} has no message_id - skipping mapping"
+                    f"[Thread ID] Communication {comm_doc.name} has no message_id"
                 )
             if not thread_id:
                 frappe.logger().debug(
-                    f"[Thread ID] Communication {comm_doc.name} has no thread_id - skipping mapping"
+                    f"[Thread ID] Communication {comm_doc.name} has no thread_id"
                 )
 
     except Exception as e:
-        # Don't fail Communication creation if mapping fails
         frappe.logger().error(
             f"[Thread ID] After insert hook failed for {getattr(comm_doc, 'name', 'Unknown')}: {str(e)}"
         )

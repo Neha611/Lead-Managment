@@ -164,8 +164,7 @@ def get_thread_id_from_message_id(message_id: str) -> Optional[str]:
             frappe.logger().debug(
                 f"[Thread Mapping] Found via Communication: {message_id} -> {comm_data.thread_id}"
             )
-            # Store in mapping table for future fast lookups
-            store_message_thread_mapping(message_id, comm_data.thread_id, comm_data.name)
+            # NOTE: Thread mapping storage disabled - just return the thread_id
             return comm_data.thread_id
         
         return None

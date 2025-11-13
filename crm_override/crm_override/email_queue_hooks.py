@@ -201,14 +201,12 @@ def on_email_queue_on_submit(doc, method):
         else:
             print(f"[Email Queue On Submit] ℹ️ Communication already has correct message_id")
         
-        # ✅ Create Email Thread Mapping entry for fast lookups
+        # NOTE: Thread mapping storage is disabled
+        # Just log for debugging
         if comm_data.thread_id:
-            from crm_override.crm_override.doctype.email_thread_mapping.email_thread_mapping import store_message_thread_mapping
-            
-            store_message_thread_mapping(doc.message_id, comm_data.thread_id, doc.communication)
-            print(f"[Email Queue On Submit] ✅ Stored thread mapping: {doc.message_id} -> {comm_data.thread_id}")
+            print(f"[Email Queue On Submit] Thread ID: {comm_data.thread_id}")
         else:
-            print(f"[Email Queue On Submit] ⚠️ Communication has no thread_id, skipping mapping")
+            print(f"[Email Queue On Submit] ⚠️ Communication has no thread_id")
             
     except Exception as e:
         print(f"[Email Queue On Submit] ❌ ERROR: {str(e)}")
