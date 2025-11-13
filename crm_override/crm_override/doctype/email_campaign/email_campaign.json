@@ -13,7 +13,12 @@
   "column_break_4",
   "start_date",
   "end_date",
-  "status"
+  "status",
+  "delivered",
+  "opened",
+  "clicked",
+  "deffered",
+  "dropped"
  ],
  "fields": [
   {
@@ -69,10 +74,40 @@
    "label": "Status",
    "options": "\nScheduled\nIn Progress\nCompleted\nUnsubscribed",
    "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "delivered",
+   "fieldtype": "Int",
+   "label": "Delivered"
+  },
+  {
+   "default": "0",
+   "fieldname": "opened",
+   "fieldtype": "Int",
+   "label": "Opened"
+  },
+  {
+   "default": "0",
+   "fieldname": "clicked",
+   "fieldtype": "Int",
+   "label": "Clicked"
+  },
+  {
+   "default": "0",
+   "fieldname": "deffered",
+   "fieldtype": "Int",
+   "label": "Deffered"
+  },
+  {
+   "default": "0",
+   "fieldname": "dropped",
+   "fieldtype": "Int",
+   "label": "Dropped"
   }
  ],
  "links": [],
- "modified": "2025-10-06 17:02:33.145111",
+ "modified": "2025-11-11 19:08:48.567164",
  "modified_by": "Administrator",
  "module": "CRM Override",
  "name": "Email Campaign",
