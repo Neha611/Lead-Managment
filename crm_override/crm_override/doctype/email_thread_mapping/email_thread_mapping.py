@@ -42,31 +42,45 @@ def _clean_message_id(msg_id: str) -> str:
 def store_message_thread_mapping(message_id: str, thread_id: str, comm_name: str = None):
     """
     Store explicit mapping between Message-ID and Thread-ID
-    
+
+    IMPORTANT: This function silently skips storage if message_id is missing/invalid.
+    This ensures Communication creation succeeds even if thread mapping fails.
+
     Args:
         message_id: Email Message-ID (with or without < >)
         thread_id: Frappe thread identifier
         comm_name: Optional Communication name for reference
     """
     try:
+        # Validate inputs before proceeding
         if not message_id or not thread_id:
-            return
-        
+            frappe.logger().debug(
+                f"[Thread Mapping] Skipping - missing data: message_id={bool(message_id)}, thread_id={bool(thread_id)}"
+            )
+            return None
+
         # Clean message_id - ensure proper format
         message_id = _clean_message_id(message_id)
-        
+
+        # After cleaning, check if message_id is still valid
+        if not message_id or message_id == '<>':
+            frappe.logger().debug(
+                f"[Thread Mapping] Skipping - invalid message_id after cleaning"
+            )
+            return None
+
         # Check if mapping already exists
         existing = frappe.db.exists(
             "Email Thread Mapping",
             {"message_id": message_id}
         )
-        
+
         if existing:
             frappe.logger().debug(
                 f"[Thread Mapping] Already exists: {message_id} -> {thread_id}"
             )
             return existing
-        
+
         # Create new mapping
         mapping = frappe.get_doc({
             "doctype": "Email Thread Mapping",
@@ -75,25 +89,34 @@ def store_message_thread_mapping(message_id: str, thread_id: str, comm_name: str
             "communication": comm_name,
             "created_at": now_datetime()
         })
+
+        # Insert with all safety flags
         mapping.insert(ignore_permissions=True, ignore_if_duplicate=True)
-        
-        # CRITICAL FIX: Commit the transaction to save to database
-        frappe.db.commit()
-        
+
         print(
             f"[Thread Mapping] ✅ Stored: {message_id} -> {thread_id} (Doc: {mapping.name})"
         )
-        
+
         return mapping.name
-        
+
     except frappe.DuplicateEntryError:
         # Silently ignore duplicates
         frappe.logger().debug(f"[Thread Mapping] Duplicate ignored: {message_id}")
         return None
+
+    except frappe.exceptions.ValidationError as ve:
+        # Handle validation errors (e.g., missing required fields)
+        # This shouldn't happen now with our pre-checks, but catch it anyway
+        frappe.logger().warning(
+            f"[Thread Mapping] Validation error, skipping: {str(ve)}"
+        )
+        return None
+
     except Exception as e:
         # Don't fail email processing if mapping fails
+        # Log the error but continue gracefully
         frappe.logger().error(
-            f"[Thread Mapping] Failed to store: {str(e)}\n{frappe.get_traceback()}"
+            f"[Thread Mapping] Failed to store mapping: {str(e)}"
         )
         return None
 

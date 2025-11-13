@@ -156,10 +156,19 @@ def process_incoming_email(normalized_email: Dict) -> Optional[str]:
             return None
         
         # Store mapping immediately (will be part of the same transaction)
+        # Only store if we have both message_id and thread_id
         if message_id and thread_id:
-            store_message_thread_mapping(message_id, thread_id, comm.name)
-            print(f"[Email Processor] 📝 Queued mapping: {message_id} -> {thread_id} -> {comm.name}")
-        
+            try:
+                store_message_thread_mapping(message_id, thread_id, comm.name)
+                print(f"[Email Processor] 📝 Queued mapping: {message_id} -> {thread_id} -> {comm.name}")
+            except Exception as mapping_error:
+                # Don't fail email processing if mapping storage fails
+                frappe.logger().warning(
+                    f"[Email Processor] Failed to store mapping, continuing: {str(mapping_error)}"
+                )
+        elif not message_id:
+            print(f"[Email Processor] ⚠️ No Message-ID available, skipping thread mapping")
+
         # Handle attachments
         _attach_files(comm, normalized_email.get('attachments', []))
         
