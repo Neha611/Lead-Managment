@@ -544,6 +544,8 @@ Subject: {subject}
 		segment_ids = validation_result.get("segment_ids", [])
 		if isinstance(segment_ids, str):
 			segment_ids = [seg.strip() for seg in segment_ids.split(",") if seg.strip()]
+		if isinstance(segment_ids, None):
+			segment_ids = []
 		for segment in segment_ids:
 			print(segment)
 			try:
